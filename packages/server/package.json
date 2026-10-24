@@ -1,0 +1,29 @@
+{
+  "name": "@office-worms/server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "types"
+  ],
+  "scripts": {
+    "build": "tsc -p ../game-core/tsconfig.json && tsc -p ../protocol/tsconfig.json && tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "test:server:tcp": "npm run build && node ../../scripts/test-server-tcp.mjs"
+  },
+  "dependencies": {
+    "@office-worms/protocol": "0.1.0",
+    "ws": "8.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5"
+  }
+}

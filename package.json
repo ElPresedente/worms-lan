@@ -1,0 +1,28 @@
+{
+  "name": "office-worms",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "npm run build && node node_modules/typescript/bin/tsc -p packages/protocol/test/tsconfig.json && node --test packages/game-core/test/*.test.mjs packages/client/test/*.test.mjs packages/protocol/test/*.test.mjs packages/server/test/*.test.mjs",
+    "demo": "npm run demo --workspace=@office-worms/game-core",
+    "dev": "node scripts/dev.mjs",
+    "preview": "node scripts/dev.mjs --preview",
+    "build:server": "npm run build --workspace=@office-worms/server",
+    "server": "npm run build:server && node packages/server/dist/main.js",
+    "test:server:tcp": "npm run test:server:tcp --workspace=@office-worms/server"
+  },
+  "devDependencies": {
+    "typescript": "5.9.2",
+    "ws": "8.20.0",
+    "@types/node": "22.20.5"
+  },
+  "engines": {
+    "node": ">=22.16.0",
+    "npm": ">=10"
+  }
+}

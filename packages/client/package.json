@@ -1,0 +1,14 @@
+{
+  "name": "@office-worms/client",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node ../../scripts/build.mjs",
+    "dev": "node ../../scripts/dev.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@office-worms/game-core": "0.1.0"
+  }
+}
