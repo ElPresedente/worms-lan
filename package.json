@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "npm run build && node node_modules/typescript/bin/tsc -p packages/protocol/test/tsconfig.json && node --test packages/game-core/test/*.test.mjs packages/client/test/*.test.mjs packages/protocol/test/*.test.mjs packages/server/test/*.test.mjs",
+    "test": "npm run build && node node_modules/typescript/bin/tsc -p packages/protocol/test/tsconfig.json && node --test packages/game-core/test/*.test.mjs packages/client/test/*.test.mjs packages/protocol/test/*.test.mjs packages/server/test/*.test.mjs packages/vscode-extension/test/*.test.mjs",
     "demo": "npm run demo --workspace=@office-worms/game-core",
     "dev": "node scripts/dev.mjs",
     "preview": "node scripts/dev.mjs --preview",

@@ -1,40 +1,25 @@
-import { LIMITS, PROTOCOL_VERSION, validateClientMessage } from '#protocol';
+import { LIMITS } from '#protocol';
 import { mountGame } from './app.js';
-import { RoomConnection, websocketAddress, type Reply } from './connection.js';
-import { rejectionMessage } from './messages.js';
-import type { RemoteSession } from './remote-session.js';
+import type { LobbyRequest } from './connection.js';
+import type { OnlineClient, OnlineMatch } from './network-client.js';
 
-const seatKey = 'office-worms.match.v2';
-
-function readSeat(): { url: string; name: string; token: string } | undefined {
-  try {
-    const { url, name, token } = JSON.parse(sessionStorage.getItem(seatKey) ?? 'null') ?? {};
-    if (typeof url !== 'string' || typeof name !== 'string' || typeof token !== 'string') return;
-    if (validateClientMessage({ protocolVersion: PROTOCOL_VERSION, type: 'hello', requestId: 'restore', resumeToken: token }).ok) {
-      return { url: websocketAddress(url), name, token };
-    }
-  } catch { /* The game can reconnect in memory when storage is unavailable. */ }
-}
-
-function failure(reply: Reply): string {
-  if (reply.type === 'error' || (reply.type === 'result' && !reply.ok)) return rejectionMessage(reply.code);
-  if (reply.type === 'unknown') return 'Сервер не подтвердил действие.';
-  if (reply.type === 'unavailable') return 'Соединение с сервером недоступно.';
-  return '';
-}
-
-export function mountOnline(root: HTMLElement): () => void {
+export function mountOnline(root: HTMLElement, connection: OnlineClient, browserNavigation = true): () => void {
+  const wordmark = '<span class="brand-mark" aria-hidden="true"><i></i><i></i></span>office<span>worms</span>';
+  const brand = browserNavigation
+    ? `<a class="wordmark" href="./" aria-label="Office Worms — главная">${wordmark}</a>`
+    : `<div class="wordmark">${wordmark}</div>`;
+  const localLink = browserNavigation ? '<a class="tool-button nav-action" href="./">Локальная игра</a>' : '';
   root.innerHTML = `
     <div id="online-lobby">
       <header class="topbar">
-        <a class="wordmark" href="./" aria-label="Office Worms — главная"><span class="brand-mark" aria-hidden="true"><i></i><i></i></span>office<span>worms</span></a>
-        <a class="tool-button nav-action" href="./">Локальная игра</a>
+        ${brand}
+        ${localLink}
       </header>
       <main class="lobby-content">
         <div class="lobby-heading"><h1>Сетевая игра<span>.</span></h1><p class="lobby-status" id="connection-status" role="status"></p></div>
         <section class="lobby-card" aria-label="Подключение к серверу">
           <form id="connect-form" class="lobby-form">
-            <label for="server-address">Адрес сервера</label>
+            <label for="server-address" id="address-label">Адрес сервера</label>
             <input id="server-address" placeholder="ws://127.0.0.1:4180/ws" type="url" required spellcheck="false">
             <label for="display-name">Имя игрока</label>
             <input id="display-name" required autocomplete="nickname">
@@ -79,65 +64,58 @@ export function mountOnline(root: HTMLElement): () => void {
   const readyButton = el<HTMLButtonElement>('room-ready');
   const startButton = el<HTMLButtonElement>('room-start');
   const lobby = el('online-lobby'), game = el('online-game');
-  const serverScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  address.value = serverScheme + '://' + (window.location.hostname || '127.0.0.1') + ':4180/ws';
+  if (!browserNavigation) {
+    el('address-label').textContent = 'Адрес сервера (настройка officeWorms.serverAddress)';
+    address.readOnly = true;
+  }
   joinCode.maxLength = LIMITS.maxIdLength;
 
-  let connection: RoomConnection | undefined;
-  let unsubscribe: (() => void) | undefined;
-  let session: RemoteSession | undefined;
+  let session: OnlineMatch | undefined;
   let app: ReturnType<typeof mountGame> | undefined;
   let busy = false;
-  const seat = readSeat();
-  let savedToken = seat?.token;
+  let submittingConnection = false;
+  let lastAddress: string | undefined;
+  let lastName: string | undefined;
 
   function error(text: string): void {
     const node = el('lobby-error');
     node.textContent = text; node.hidden = !text;
   }
 
-  async function run(request: Parameters<RoomConnection['lobby']>[0]): Promise<string> {
-    const active = connection;
-    if (active?.status !== 'ready' || busy) return '';
+  async function run(request: LobbyRequest): Promise<string> {
+    if (connection.status !== 'ready' || busy) return '';
     error('');
     busy = true;
     render();
-    const reply = await active.lobby(request);
-    if (abort.signal.aborted || active !== connection) return '';
+    const message = await connection.lobby(request);
+    if (abort.signal.aborted) return '';
     busy = false;
     render();
-    return failure(reply);
+    return message;
   }
 
-  async function submit(request: Parameters<RoomConnection['lobby']>[0]): Promise<void> {
+  async function submit(request: LobbyRequest): Promise<void> {
     const message = await run(request);
     if (!abort.signal.aborted) error(message);
   }
 
   function render(): void {
-    const match = connection?.match;
-    const room = connection?.room;
-    const status = connection?.status ?? 'disconnected';
+    const { match, room, status } = connection;
     const connected = status === 'ready';
     const reconnecting = status === 'reconnecting';
-    const pending = status === 'connecting' || reconnecting;
-    const token = connection?.resumeToken;
-    if (savedToken !== token) {
-      savedToken = token;
-      try {
-        if (token) sessionStorage.setItem(seatKey, JSON.stringify({ url: address.value, name: displayName.value, token }));
-        else sessionStorage.removeItem(seatKey);
-      } catch { /* Saving the seat across reloads is best effort. */ }
-    }
+    const pending = submittingConnection || status === 'connecting' || reconnecting;
+    if (lastAddress !== connection.address) address.value = lastAddress = connection.address;
+    if (lastName !== connection.displayName) displayName.value = lastName = connection.displayName;
     if (session !== match) {
       app?.destroy();
       session = match;
       app = match && room ? mountGame(game, match, {
+        browserNavigation,
         online: {
           playerId: match.playerId,
           names: new Map(room.players.map(player => [player.playerId, player.displayName])),
           leave: async () => {
-            if (connection?.status === 'reconnecting') {
+            if (connection.status === 'reconnecting') {
               connection.disconnect('Вы отменили восстановление соединения.');
               return '';
             }
@@ -158,13 +136,13 @@ export function mountOnline(root: HTMLElement): () => void {
     el('connection-status').textContent = ({ connecting: 'Подключаемся…', reconnecting: 'Восстанавливаем матч…',
       ready: 'Подключено', disconnected: 'Нет подключения' })[status];
     const notice = el('lobby-notice');
-    notice.textContent = connection?.notice ?? '';
+    notice.textContent = connection.notice;
     notice.hidden = !notice.textContent;
     address.disabled = displayName.disabled = connectButton.disabled = pending || connected;
     connectButton.hidden = connected;
     connectButton.textContent = pending ? 'Подключаемся…' : 'Подключиться';
     const disconnect = el('disconnect');
-    disconnect.hidden = !connected && !pending;
+    disconnect.hidden = status === 'disconnected';
     disconnect.textContent = reconnecting ? 'Отменить восстановление' : 'Отключиться от сервера';
     el('room-actions').hidden = !connected || Boolean(room);
     el('room-details').hidden = !connected || !room;
@@ -172,8 +150,8 @@ export function mountOnline(root: HTMLElement): () => void {
     if (!room) return;
 
     roomCode.value = room.roomId;
-    const host = room.hostPlayerId === connection?.playerId;
-    const me = room.players.find(player => player.playerId === connection?.playerId);
+    const host = room.hostPlayerId === connection.playerId;
+    const me = room.players.find(player => player.playerId === connection.playerId);
     const waitingForPlayer = room.players.length < LIMITS.maxPlayersPerRoom;
     const bothReady = !waitingForPlayer && room.players.every(player => player.ready);
     const rows = room.players.map(player => {
@@ -200,35 +178,25 @@ export function mountOnline(root: HTMLElement): () => void {
       'Для запуска оба игрока должны отметить готовность.';
   }
 
-  function connect(url: string, name: string, token?: string): void {
-    try {
-      const next = new RoomConnection(() => new WebSocket(url), name, token ? { resumeToken: token } : {});
-      unsubscribe?.();
-      connection = next;
-      busy = false;
-      address.value = url;
-      displayName.value = name;
-      unsubscribe = next.subscribe(render);
-    } catch {
-      error('Не удалось открыть соединение. Проверьте адрес и настройки страницы.');
-    }
-  }
-
-  on(el('connect-form'), 'submit', event => {
+  on(el('connect-form'), 'submit', async event => {
     event.preventDefault();
-    if (connection && connection.status !== 'disconnected') return;
+    if (submittingConnection || connection.status !== 'disconnected') return;
     error('');
     const name = displayName.value.trim();
     if (!name || [...name].length > LIMITS.maxDisplayNameLength || /[\u0000-\u001f\u007f]/u.test(name)) {
       error('Введите имя длиной от 1 до ' + LIMITS.maxDisplayNameLength + ' символов.');
       return;
     }
-    let url: string;
-    try { url = websocketAddress(address.value); }
-    catch { error('Укажите WebSocket-адрес вида ws://адрес:4180/ws.'); return; }
-    connect(url, name);
+    submittingConnection = true;
+    busy = false;
+    render();
+    const message = await connection.connect(name, browserNavigation ? address.value : undefined);
+    if (abort.signal.aborted) return;
+    submittingConnection = false;
+    error(message);
+    render();
   });
-  on(el('disconnect'), 'click', () => { error(''); connection?.disconnect('Вы отключились от сервера.'); });
+  on(el('disconnect'), 'click', () => { error(''); connection.disconnect('Вы отключились от сервера.'); });
   on(el('create-room'), 'click', () => { void submit({ type: 'room.create' }); });
   on(el('join-form'), 'submit', event => {
     event.preventDefault();
@@ -237,15 +205,15 @@ export function mountOnline(root: HTMLElement): () => void {
     void submit({ type: 'room.join', roomId });
   });
   on(readyButton, 'click', () => {
-    const room = connection?.room;
-    const player = room?.players.find(item => item.playerId === connection?.playerId);
+    const room = connection.room;
+    const player = room?.players.find(item => item.playerId === connection.playerId);
     if (room && player) void submit({ type: 'room.ready', roomId: room.roomId, ready: !player.ready });
   });
   on(startButton, 'click', () => {
-    if (connection?.room) void submit({ type: 'room.start', roomId: connection.room.roomId });
+    if (connection.room) void submit({ type: 'room.start', roomId: connection.room.roomId });
   });
   on(el('room-leave'), 'click', () => {
-    if (connection?.room) void submit({ type: 'room.leave', roomId: connection.room.roomId });
+    if (connection.room) void submit({ type: 'room.leave', roomId: connection.room.roomId });
   });
   on(el('copy-code'), 'click', async () => {
     const notice = el('lobby-notice');
@@ -259,16 +227,14 @@ export function mountOnline(root: HTMLElement): () => void {
     notice.hidden = false;
   });
 
-  on(document, 'visibilitychange', () => { if (!document.hidden) connection?.resync(); });
-  on(window, 'online', () => connection?.resync());
+  on(document, 'visibilitychange', () => { if (!document.hidden) connection.resync(); });
+  on(window, 'online', () => connection.resync());
 
-  if (seat) connect(seat.url, seat.name, seat.token);
-  else render();
+  const unsubscribe = connection.subscribe(render);
   return () => {
     abort.abort();
-    unsubscribe?.();
+    unsubscribe();
     app?.destroy();
-    connection?.disconnect();
     root.replaceChildren();
   };
 }

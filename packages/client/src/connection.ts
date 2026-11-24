@@ -4,7 +4,7 @@ import { RemoteSession } from './remote-session.js';
 
 type WithoutEnvelope<T> = T extends ClientMessage ? Omit<T, 'protocolVersion' | 'requestId'> : never;
 export type Request = WithoutEnvelope<ClientMessage>;
-type LobbyRequest = Extract<Request, { type: `room.${string}` }>;
+export type LobbyRequest = Extract<Request, { type: `room.${string}` }>;
 export type GameRequest = Extract<Request, { type: 'game.snapshot' }> |
   Omit<Extract<Request, { type: 'game.command' }>, 'commandId'>;
 type WireReply = Extract<ServerMessage, { requestId: string } | { type: 'error' }>;

@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noEmitOnError": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "#client/*": ["../client/dist/*.d.ts"],
+      "#protocol": ["../protocol/dist/index.d.ts"],
+      "@office-worms/game-core": ["../game-core/dist/index.d.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

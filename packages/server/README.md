@@ -1,7 +1,7 @@
 # Игровой сервер
 
 `@office-worms/server`, стадия S2. Сервер ведёт комнаты и матчи через WebSocket и удерживает места при разрыве.
-Лобби и матч доступны через RemoteSession в [браузерном клиенте](../client/README.md).
+Лобби и матч доступны через RemoteSession в [браузере](../client/README.md) и [VS Code](../vscode-extension/README.md).
 [Контракт v2](../protocol/SPEC.md), [план сервера](ROADMAP.md).
 
 ## Запуск
@@ -44,7 +44,7 @@ Origin сравнивается точно; wildcard, opaque null и Origin с �
 Текущий dev-сервер клиента доступен только на localhost; настройка игрового сервера сама
 по себе не публикует браузерную страницу в LAN.
 
-Для native/CLI-клиента без заголовка Origin нужен явный `--allow-no-origin`.
+Для хоста расширения VS Code и других клиентов без заголовка Origin нужен `--allow-no-origin`.
 Присутствующий чужой Origin остаётся запрещённым даже с этим флагом.
 Внешний HTTPS-хост можно передать через `createMatchServer({ httpServer, config })`.
 Экземпляр управляет его запуском и остановкой.

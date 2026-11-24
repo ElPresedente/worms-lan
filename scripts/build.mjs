@@ -6,7 +6,7 @@ import path from 'node:path';
 export const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 export function build() {
   const tsc = path.join(projectRoot, 'node_modules/typescript/bin/tsc');
-  for (const name of ['game-core', 'protocol', 'server', 'client']) {
+  for (const name of ['game-core', 'protocol', 'server', 'client', 'vscode-extension']) {
     const result = spawnSync(process.execPath, [tsc, '-p', path.join(projectRoot, 'packages', name, 'tsconfig.json')], {
       stdio: 'inherit', cwd: projectRoot,
     });
@@ -19,7 +19,7 @@ export function build() {
   cpSync(path.join(projectRoot, 'packages/game-core/dist'), path.join(out, 'core'), { recursive: true });
   cpSync(path.join(projectRoot, 'packages/protocol/dist'), path.join(out, 'protocol'), { recursive: true });
   const extensionClient = path.join(projectRoot, 'packages/vscode-extension/dist/client');
-  cpSync(out, extensionClient, { recursive: true });
+  cpSync(out, extensionClient, { recursive: true, filter: source => !source.endsWith('.d.ts') });
   console.log('Built game-core, protocol, server, browser client and VS Code webview assets');
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

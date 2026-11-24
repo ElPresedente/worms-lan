@@ -289,6 +289,16 @@ export function validateClientMessage(value: unknown): ValidationResult<ClientMe
 export function validateServerMessage(value: unknown, context: ValidationContext = {}): ValidationResult<ServerMessage> {
   return validate(value, LIMITS.maxServerMessageBytes, (v, p) => serverCheck(v, p, context));
 }
+/** Validates the game data carried by a local host bridge. */
+export function isGameUpdate(value: unknown): value is { state: GameState; events: readonly GameEvent[] } {
+  try {
+    jsonSize(value, LIMITS.maxServerMessageBytes);
+    exact({ state, events: array(event, 0, LIMITS.maxEventsPerUpdate) })(value, '$');
+    const update = value as { state: GameState; events: GameEvent[] };
+    checkEventReferences(update.events, update.state, '$.events');
+    return true;
+  } catch { return false; }
+}
 export function parseClientMessage(text: unknown): ValidationResult<ClientMessage> {
   return parse(text, LIMITS.maxClientMessageBytes, validateClientMessage);
 }

@@ -1,15 +1,32 @@
 {
   "name": "office-worms-vscode",
   "displayName": "Office Worms",
-  "description": "Local two-player Office Worms in a VS Code editor tab.",
+  "description": "Local and network Office Worms in a VS Code editor tab.",
   "publisher": "office-worms",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
+  "extensionKind": ["ui"],
   "engines": {
     "vscode": "^1.103.0"
   },
   "main": "./src/extension.cjs",
+  "imports": {
+    "#client/*": "./dist/client/*.js",
+    "#protocol": "./dist/client/protocol/index.js"
+  },
   "contributes": {
+    "configuration": {
+      "title": "Office Worms",
+      "properties": {
+        "officeWorms.serverAddress": {
+          "type": "string",
+          "default": "ws://127.0.0.1:4180/ws",
+          "scope": "machine",
+          "description": "WebSocket address used when connecting to an Office Worms server."
+        }
+      }
+    },
     "commands": [
       {
         "command": "officeWorms.open",
@@ -19,6 +36,16 @@
       {
         "command": "officeWorms.focus",
         "title": "Focus Game",
+        "category": "Office Worms"
+      },
+      {
+        "command": "officeWorms.openNetwork",
+        "title": "Open Network Game",
+        "category": "Office Worms"
+      },
+      {
+        "command": "officeWorms.openLocal",
+        "title": "Open Local Game",
         "category": "Office Worms"
       }
     ]
