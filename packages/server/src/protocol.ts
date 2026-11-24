@@ -2,4 +2,7 @@
  * The server and protocol packages remain siblings in this workspace deployment.
  */
 export { LIMITS, PROTOCOL_VERSION, parseClientMessage, validateServerMessage } from '../../protocol/dist/index.js';
-export type { ClientMessage, ServerMessage, ProtocolErrorCode } from '../../protocol/dist/index.js';
+export type {
+  AddressRejection, ClientMessage, ProtocolErrorCode, RequestFailure, Room,
+  ServerMessage, SnapshotFields,
+} from '../../protocol/dist/index.js';

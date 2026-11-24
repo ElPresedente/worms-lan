@@ -17,6 +17,7 @@ export function build() {
   mkdirSync(out, { recursive: true });
   cpSync(path.join(projectRoot, 'packages/client/public'), out, { recursive: true });
   cpSync(path.join(projectRoot, 'packages/game-core/dist'), path.join(out, 'core'), { recursive: true });
+  cpSync(path.join(projectRoot, 'packages/protocol/dist'), path.join(out, 'protocol'), { recursive: true });
   console.log('Built game-core + protocol + server + client; browser → packages/client/dist');
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

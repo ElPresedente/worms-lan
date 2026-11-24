@@ -1,8 +1,9 @@
 import { TICK_RATE } from '@office-worms/game-core';
 import type { GameEvent, GameState } from '@office-worms/game-core';
-import type { GameSession } from './session.js';
+import type { CommandOutcome, GameSession } from './session.js';
 import { Battlefield } from './renderer.js';
 import { GameplayControls } from './controls.js';
+import { rejectionMessage } from './messages.js';
 
 export interface DebugControls {
   paused(): boolean;
@@ -11,11 +12,16 @@ export interface DebugControls {
   speed(value: number): void;
   reset(map: string, wind: number): void;
 }
-const names: Record<string, string> = { coral: 'Коралловые', mint: 'Мятные' };
+interface OnlineControls {
+  playerId: string;
+  names: ReadonlyMap<string, string>;
+  leave(): Promise<string>;
+  refresh(): Promise<boolean>;
+}
+const names = new Map([['coral', 'Коралловые'], ['mint', 'Мятные']]);
 const phaseNames = { waiting: 'Ожидание игрока', active: 'Ваш ход', resolving: 'Завершение хода', finished: 'Партия завершена' };
-const name = (id: string) => names[id] ?? id;
 
-function describe(event: GameEvent): string {
+function describe(event: GameEvent, name: (id: string) => string): string {
   switch (event.type) {
     case 'turn-started': return name(event.playerId) + ' начали ход';
     case 'shot-fired': return name(event.playerId) + ' выстрелили';
@@ -32,12 +38,13 @@ function describe(event: GameEvent): string {
 }
 
 /** Portable DOM entrypoint: browser today, the same bundle in a VS Code webview later. */
-export function mountGame(root: HTMLElement, session: GameSession, debug?: DebugControls) {
+export function mountGame(root: HTMLElement, session: GameSession, debug?: DebugControls, online?: OnlineControls) {
+  const name = (id: string) => (online?.names ?? names).get(id) ?? id;
   root.innerHTML = `
     <header class="topbar">
       <a class="wordmark" href="./" aria-label="Office Worms — главная"><span class="brand-mark" aria-hidden="true"><i></i><i></i></span>office<span>worms</span></a>
-      <div class="mode"><span class="live-dot"></span> Локальный режим <span class="mode-note">/ 2 игрока за одним экраном</span></div>
-      <span class="build-label">ПОЛИГОН 001</span>
+      <div class="mode"><span class="live-dot"></span> ${online ? 'Сетевая партия' : 'Локальный режим <span class="mode-note">/ 2 игрока за одним экраном</span>'}</div>
+      ${online ? '<button type="button" class="tool-button nav-action" id="leave-match">Покинуть комнату</button>' : '<a class="tool-button nav-action" href="?mode=online">Сетевая игра</a>'}
     </header>
     <main>
       <div class="page-heading"><div><p class="eyebrow">КОРОТКИЙ ПЕРЕРЫВ. ДЛИННАЯ ПАРТИЯ.</p><h1>Офисная баллистика<span>.</span></h1></div><p class="heading-note">Сделай ход.<br>Почти как работа.</p></div>
@@ -73,7 +80,9 @@ export function mountGame(root: HTMLElement, session: GameSession, debug?: Debug
           <div class="range-ends"><span>Минимальная</span><span>Максимальная</span></div>
           <button class="button button-coral" id="fire" disabled>Огонь <span class="key key-dark">Space</span></button>
           <button class="button button-quiet" id="pass" disabled>Пропустить ход →</button>
+          <p class="input-hint" id="command-status" role="status" hidden></p>
           <p class="error" id="error" role="alert" hidden></p>
+          ${online ? '<button type="button" class="tool-button" id="refresh-game" hidden>Запросить снимок</button>' : ''}
           <div class="settings"><p class="eyebrow">НОВАЯ ПАРТИЯ</p><div class="setting-row"><label for="map">Карта</label><select id="map"><option value="flat">Равнина</option><option value="hills">Холмы</option><option value="course">Полоса препятствий</option><option value="falls">Высота и падения</option></select></div><div class="setting-row"><label for="wind">Ветер</label><input type="number" id="wind" value="0" min="-30" max="30" step="1" aria-label="Ветер новой партии"></div><button class="reset-button" id="reset">↻ Перезапустить матч</button></div>
         </aside>
         <section class="debug-panel" aria-label="Отладка ядра">
@@ -91,7 +100,7 @@ export function mountGame(root: HTMLElement, session: GameSession, debug?: Debug
   }
   const canvas = el<HTMLCanvasElement>('battlefield');
   const renderer = new Battlefield(canvas);
-  const controls = new GameplayControls(session, () => !(debug?.paused() ?? false));
+  const controls = new GameplayControls(session, () => true, showOutcome);
   const angle = el<HTMLInputElement>('angle'), power = el<HTMLInputElement>('power');
   const startButton = el<HTMLButtonElement>('start-turn'), fireButton = el<HTMLButtonElement>('fire');
   const pass = el<HTMLButtonElement>('pass'), pause = el<HTMLButtonElement>('pause');
@@ -99,9 +108,18 @@ export function mountGame(root: HTMLElement, session: GameSession, debug?: Debug
   const speed = el<HTMLSelectElement>('speed'), inspector = el<HTMLDetailsElement>('inspector');
   const map = el<HTMLSelectElement>('map'), wind = el<HTMLInputElement>('wind');
   let lastTurn = -1, lastPhase = '', eventCount = 0;
+  let pendingActions = 0;
   const abort = new AbortController();
   const on = (target: EventTarget, type: string, handler: EventListener) => target.addEventListener(type, handler, { signal: abort.signal });
   function error(message: string): void { el('error').textContent = message; el('error').hidden = !message; }
+  function showOutcome(outcome: CommandOutcome): void {
+    if (abort.signal.aborted) return;
+    if (outcome.kind === 'rejected' || outcome.kind === 'error') error(rejectionMessage(outcome.code));
+    if (outcome.kind === 'unknown') {
+      error('Сервер не подтвердил команду. Проверьте состояние игры перед следующим действием.');
+      if (online) el('refresh-game').hidden = false;
+    }
+  }
   function aim(): void {
     renderer.angle = Number(angle.value);
     el('angle-value').textContent = angle.value + '°';
@@ -109,16 +127,23 @@ export function mountGame(root: HTMLElement, session: GameSession, debug?: Debug
     angle.style.setProperty('--fill', Number(angle.value) / 180 * 100 + '%');
     power.style.setProperty('--fill', power.value + '%');
   }
-  function debugUI(): void {
+  function refreshControls(): void {
     const paused = debug?.paused() ?? false;
     pause.textContent = paused ? '▶ Продолжить' : 'Ⅱ Пауза';
     pause.setAttribute('aria-pressed', String(paused));
     tick.disabled = !paused || !debug;
     el('paused-overlay').hidden = !paused;
-    for (const id of ['move-left', 'move-right', 'jump']) {
-      const worm = session.state.worms.find(w => w.playerId === session.state.players[session.state.activePlayerIndex] && w.health > 0);
-      el<HTMLButtonElement>(id).disabled = paused || session.state.phase !== 'active' || !worm || (id === 'jump' && !worm.grounded);
-    }
+    const state = session.state;
+    const worm = state.worms.find(w => w.playerId === state.players[state.activePlayerIndex] && w.health > 0);
+    el<HTMLButtonElement>('move-left').disabled = el<HTMLButtonElement>('move-right').disabled = !worm || !session.canCommand('move');
+    el<HTMLButtonElement>('jump').disabled = !worm?.grounded || !session.canCommand('jump');
+    fireButton.disabled = !session.canCommand('fire');
+    pass.disabled = !session.canCommand('end-turn');
+    startButton.hidden = state.phase !== 'waiting' || !session.canControl;
+    startButton.disabled = !session.canCommand('start-turn');
+    angle.disabled = power.disabled = !session.canControl || state.phase === 'resolving' || state.phase === 'finished';
+    renderer.showAim = session.canControl;
+    canvas.style.cursor = session.canControl && state.phase === 'active' ? 'crosshair' : 'default';
   }
   function snapshot(state: GameState): void {
     if (!inspector.open) return;
@@ -127,12 +152,20 @@ export function mountGame(root: HTMLElement, session: GameSession, debug?: Debug
       ...state, terrain: { ...terrain, solidCells: cells.reduce((sum, cell) => sum + cell, 0), cells: '[bitmap omitted]' },
     }, null, 2);
   }
-  function send(type: 'start-turn' | 'fire' | 'end-turn'): void {
-    const playerId = session.state.players[session.state.activePlayerIndex]!;
-    const result = session.send(type === 'fire'
-      ? { type, playerId, angleDegrees: Number(angle.value), power: Number(power.value) / 100 }
-      : { type, playerId });
-    error(result ? 'Команда отклонена ядром: ' + result : '');
+  async function send(type: 'start-turn' | 'fire' | 'end-turn'): Promise<void> {
+    if (!session.canCommand(type)) return;
+    error('');
+    const status = el('command-status');
+    if (online) {
+      pendingActions++;
+      status.textContent = 'Ожидаем подтверждение сервера…';
+      status.hidden = false;
+    }
+    const outcome = await session.command(type === 'fire'
+      ? { type, angleDegrees: Number(angle.value), power: Number(power.value) / 100 }
+      : { type });
+    if (online) status.hidden = --pendingActions === 0;
+    showOutcome(outcome);
   }
   function log(event: GameEvent, state: GameState): void {
     eventCount++;
@@ -141,7 +174,7 @@ export function mountGame(root: HTMLElement, session: GameSession, debug?: Debug
     const row = document.createElement('li');
     const stamp = document.createElement('span'); stamp.className = 'event-tick'; stamp.textContent = String(state.tick).padStart(5, '0');
     const kind = document.createElement('code'); kind.textContent = event.type;
-    const text = document.createElement('span'); text.className = 'event-message'; text.textContent = describe(event);
+    const text = document.createElement('span'); text.className = 'event-message'; text.textContent = describe(event, name);
     row.title = JSON.stringify(event);
     row.append(stamp, kind, text); list.prepend(row);
     while (list.children.length > 60) list.lastElementChild?.remove();
@@ -161,6 +194,9 @@ export function mountGame(root: HTMLElement, session: GameSession, debug?: Debug
     }
     for (const event of update.events) log(event, state);
     for (const [i, worm] of state.worms.entries()) {
+      const team = el('team-' + i);
+      team.querySelector('strong')!.textContent = name(worm.playerId);
+      if (online) team.querySelector('.team-label')!.textContent = worm.playerId === online.playerId ? 'ВЫ' : 'СОПЕРНИК';
       el('hp-' + i).innerHTML = worm.health + ' <small>HP</small>';
       el('health-' + i).style.width = Math.max(0, Math.min(100, worm.health)) + '%';
       el('team-' + i).classList.toggle('is-active', worm.playerId === playerId && state.phase !== 'finished');
@@ -170,47 +206,46 @@ export function mountGame(root: HTMLElement, session: GameSession, debug?: Debug
     el('turn-label').textContent = 'ХОД ' + String(state.turnNumber).padStart(2, '0');
     el('timer').textContent = state.phase === 'active' ? Math.ceil(state.turnTicksRemaining / TICK_RATE) + 'с' : finished ? '✓' : '—';
     el('timer').classList.toggle('timer-low', state.phase === 'active' && state.turnTicksRemaining < 10 * TICK_RATE);
-    const status = finished ? (state.winnerId ? 'Победили ' + name(state.winnerId) : 'Ничья!') : phaseNames[state.phase];
+    const opponent = online && !session.canControl && (state.phase === 'waiting' || state.phase === 'active');
+    const status = finished ? (state.winnerId ? 'Победа · ' + name(state.winnerId) : 'Ничья!') :
+      opponent && state.phase === 'active' ? 'Ход соперника' : phaseNames[state.phase];
     el('field-phase').textContent = status;
     el('control-eyebrow').textContent = finished ? 'РЕЗУЛЬТАТ ПАРТИИ' : 'ОЧЕРЕДЬ КОМАНДЫ 0' + (state.activePlayerIndex + 1);
-    el('control-title').textContent = finished ? (state.winnerId ? name(state.winnerId) + ' победили' : 'Ничья') : name(playerId);
-    el('turn-help').textContent = ({
+    el('control-title').textContent = finished ? (state.winnerId ? 'Победа · ' + name(state.winnerId) : 'Ничья') : name(playerId);
+    el('turn-help').textContent = opponent ? 'Управление станет доступно в ваш ход.' : ({
       waiting: 'Начни ход, когда будешь готов. Таймер пока не идёт.',
       active: 'Двигайся, прыгай, выбери угол и силу. Один выстрел за ход.',
       resolving: 'Ждём взрыва и завершения падений. Ядро считает результат.',
-      finished: 'Можно начать новую партию с другой картой или ветром.',
+      finished: online ? 'Покиньте комнату, чтобы создать новую партию.' : 'Можно начать новую партию с другой картой или ветром.',
     })[state.phase];
-    startButton.hidden = state.phase !== 'waiting';
-    fireButton.disabled = pass.disabled = state.phase !== 'active';
     el('input-hint').textContent = map.value === 'course'
       ? 'Слева направо: ступени → стена → потолок → яма. Клик — прицел, Space — огонь.'
       : map.value === 'falls' ? 'Справа от уступа — глубокое падение. Урон появится при приземлении.'
       : 'Клик по полю — прицел. Space — огонь.';
-    angle.disabled = power.disabled = state.phase === 'resolving' || finished;
-    canvas.style.cursor = state.phase === 'active' ? 'crosshair' : 'default';
     el('wind-label').textContent = 'ВЕТЕР ' + (state.wind === 0 ? '· ШТИЛЬ' : (state.wind > 0 ? '→ +' : '← ') + state.wind);
     el('tick-label').textContent = 'TICK ' + String(state.tick).padStart(5, '0');
     if (lastPhase !== state.phase || update.events.some(e => e.type === 'turn-ready')) {
       el('announcement').textContent = status + '. ' + name(playerId);
       lastPhase = state.phase;
     }
-    if (state.tick % 6 === 0 || update.events.length || update.reset) snapshot(state);
-    debugUI();
+    if (online || state.tick % 6 === 0 || update.events.length || update.reset) snapshot(state);
+    refreshControls();
   });
   on(angle, 'input', aim); on(power, 'input', aim);
-  on(startButton, 'click', () => { send('start-turn'); canvas.focus(); });
-  on(fireButton, 'click', () => send('fire'));
-  on(pass, 'click', () => send('end-turn'));
+  on(startButton, 'click', () => { void send('start-turn'); canvas.focus(); });
+  on(fireButton, 'click', () => { void send('fire'); });
+  on(pass, 'click', () => { void send('end-turn'); });
   on(canvas, 'pointerdown', event => {
-    if (session.state.phase !== 'active') return;
+    if (!session.canControl || session.state.phase !== 'active') return;
     const p = event as PointerEvent;
     const point = renderer.point(p.clientX, p.clientY, session.state);
-    const worm = session.state.worms.find(w => w.playerId === session.state.players[session.state.activePlayerIndex] && w.health > 0)!;
+    const worm = session.state.worms.find(w => w.playerId === session.state.players[session.state.activePlayerIndex] && w.health > 0);
+    if (!worm) return;
     angle.value = String(Math.round(Math.max(0, Math.min(180,
       Math.atan2(Math.max(0, worm.position.y - point.y), point.x - worm.position.x) * 180 / Math.PI))));
     aim(); canvas.focus();
   });
-  on(pause, 'click', () => { controls.releaseAll(); debug?.pause(!debug.paused()); debugUI(); });
+  on(pause, 'click', () => { controls.releaseAll(); debug?.pause(!debug.paused()); refreshControls(); });
   on(tick, 'click', () => { debug?.step(); snapshot(session.state); });
   on(speed, 'change', () => debug?.speed(Number(speed.value)));
   on(el('grid'), 'change', () => { renderer.grid = el<HTMLInputElement>('grid').checked; });
@@ -218,15 +253,15 @@ export function mountGame(root: HTMLElement, session: GameSession, debug?: Debug
   on(inspector, 'toggle', () => snapshot(session.state));
   on(reset, 'click', () => {
     if (!wind.checkValidity()) { wind.reportValidity(); return; }
-    controls.releaseAll(); debug?.reset(map.value, Number(wind.value)); debugUI();
+    controls.releaseAll(); debug?.reset(map.value, Number(wind.value)); refreshControls();
   });
   on(root, 'keydown', event => {
     const e = event as KeyboardEvent;
     if (e.ctrlKey || e.altKey || e.metaKey || e.isComposing) return;
     if (e.target instanceof HTMLElement && e.target.closest('input, select, button, summary, textarea, [contenteditable]')) return;
     if (controls.press(e.code, e.repeat)) { e.preventDefault(); return; }
-    if (e.code === 'Space' && session.state.phase === 'active' && !e.repeat && !debug?.paused()) {
-      e.preventDefault(); send('fire');
+    if (e.code === 'Space' && session.canCommand('fire') && !e.repeat && !debug?.paused()) {
+      e.preventDefault(); void send('fire');
     }
   });
   on(window, 'keyup', event => { if (controls.release((event as KeyboardEvent).code)) event.preventDefault(); });
@@ -255,8 +290,32 @@ export function mountGame(root: HTMLElement, session: GameSession, debug?: Debug
     });
     on(button, 'blur', () => controls.release(code));
   }
-  if (!debug) { pause.disabled = tick.disabled = speed.disabled = reset.disabled = true; }
-  aim(); debugUI();
+  if (online) {
+    el('clock-note').textContent = 'Таймер работает на сервере, даже когда вкладка скрыта.';
+    root.querySelector<HTMLElement>('.settings')!.hidden = true;
+    for (const control of [pause, tick, speed, el('grid').parentElement!, el('bodies').parentElement!]) control.hidden = true;
+    root.querySelector('.debug-toolbar .eyebrow')!.textContent = 'СОСТОЯНИЕ СЕРВЕРА';
+    const leave = el<HTMLButtonElement>('leave-match');
+    on(leave, 'click', async () => {
+      leave.disabled = true;
+      const failure = await online.leave();
+      if (!abort.signal.aborted) {
+        error(failure);
+        leave.disabled = false;
+      }
+    });
+    const refresh = el<HTMLButtonElement>('refresh-game');
+    on(refresh, 'click', async () => {
+      refresh.disabled = true;
+      const updated = await online.refresh();
+      if (!abort.signal.aborted) {
+        refresh.disabled = false;
+        refresh.hidden = updated;
+        error(updated ? '' : 'Снимок не получен. Попробуйте ещё раз.');
+      }
+    });
+  }
+  aim(); refreshControls();
   let raf = 0;
   const render = (now: number) => { renderer.draw(session.state, now); raf = requestAnimationFrame(render); };
   raf = requestAnimationFrame(render);

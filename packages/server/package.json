@@ -20,6 +20,7 @@
     "test:server:tcp": "npm run build && node ../../scripts/test-server-tcp.mjs"
   },
   "dependencies": {
+    "@office-worms/game-core": "0.1.0",
     "@office-worms/protocol": "0.1.0",
     "ws": "8.20.0"
   },

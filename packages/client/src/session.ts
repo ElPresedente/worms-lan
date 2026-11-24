@@ -1,18 +1,27 @@
 import type { Action, GameEvent, GameOptions, GameState, Rejection } from '@office-worms/game-core';
+import type { AddressRejection, NetworkAction, ProtocolErrorCode } from '#protocol';
 
 export interface Update {
   state: GameState;
   events: readonly GameEvent[];
   reset: boolean;
+  terrainChanged?: boolean;
 }
+export type CommandOutcome =
+  | { kind: 'accepted' | 'unknown' | 'skipped' }
+  | { kind: 'rejected'; code: Rejection | AddressRejection }
+  | { kind: 'error'; code: ProtocolErrorCode };
+
 export interface GameSession {
   readonly state: GameState;
-  send(action: Action): Rejection | null;
+  readonly canControl: boolean;
+  canCommand(type: NetworkAction['type']): boolean;
+  command(action: NetworkAction): Promise<CommandOutcome>;
   subscribe(listener: (update: Update) => void): () => void;
 }
 export type CoreEngine = Pick<typeof import('@office-worms/game-core'), 'createGame' | 'dispatch' | 'step'>;
 
-/** Browser development adapter. A future remote adapter supplies server snapshots. */
+/** Browser development adapter with synchronous access to the core for diagnostics. */
 export class LocalSession implements GameSession {
   private current: GameState;
   private readonly listeners = new Set<(update: Update) => void>();
@@ -23,7 +32,17 @@ export class LocalSession implements GameSession {
     this.current = core.createGame(options);
   }
   get state(): GameState { return this.current; }
+  get canControl(): boolean { return true; }
   get paused(): boolean { return this.isPaused; }
+  canCommand(type: NetworkAction['type']): boolean {
+    return this.current.phase === (type === 'start-turn' ? 'waiting' : 'active') &&
+      (!this.isPaused || (type !== 'move' && type !== 'jump'));
+  }
+  async command(action: NetworkAction): Promise<CommandOutcome> {
+    if (!this.canCommand(action.type)) return { kind: 'skipped' };
+    const code = this.send({ ...action, playerId: this.current.players[this.current.activePlayerIndex]! });
+    return code ? { kind: 'rejected', code } : { kind: 'accepted' };
+  }
   subscribe(listener: (update: Update) => void): () => void {
     this.listeners.add(listener);
     listener({ state: this.current, events: [], reset: true });

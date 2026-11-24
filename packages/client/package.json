@@ -3,12 +3,16 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "imports": {
+    "#protocol": "./dist/protocol/index.js"
+  },
   "scripts": {
     "build": "node ../../scripts/build.mjs",
     "dev": "node ../../scripts/dev.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@office-worms/game-core": "0.1.0"
+    "@office-worms/game-core": "0.1.0",
+    "@office-worms/protocol": "0.1.0"
   }
 }

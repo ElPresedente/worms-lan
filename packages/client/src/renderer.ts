@@ -17,12 +17,14 @@ export class Battlefield {
   grid = false;
   bodies = false;
   angle = 25;
+  showAim = true;
   constructor(private readonly canvas: HTMLCanvasElement) {
     const context = canvas.getContext('2d');
     if (!context) throw new Error('Canvas 2D is unavailable');
     this.ctx = context;
   }
   accept(update: Update): void {
+    if (update.terrainChanged) this.dirty = true;
     if (update.reset) { this.dirty = true; this.blasts = []; this.impacts = []; this.trail = []; this.lastProjectileTick = -1; }
     for (const event of update.events) {
       if (event.type === 'damage' || event.type === 'worm-landed') {
@@ -136,7 +138,7 @@ export class Battlefield {
         ctx.fillStyle = COLORS[i % 2]!;
         ctx.beginPath(); ctx.moveTo(x, y - 12); ctx.lineTo(x - 1.7, y - 15); ctx.lineTo(x + 1.7, y - 15); ctx.fill();
       }
-      if (active && state.phase === 'active') {
+      if (active && state.phase === 'active' && this.showAim) {
         const a = this.angle * Math.PI / 180;
         ctx.strokeStyle = '#273e43'; ctx.lineWidth = 2.4;
         ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * 2, y - Math.sin(a) * 2);

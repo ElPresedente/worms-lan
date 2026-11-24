@@ -4,3 +4,25 @@
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 
 .movement-controls{display:flex;gap:7px;margin-top:14px}.movement-controls button{flex:1;min-height:38px;touch-action:none;user-select:none}.input-hint{font-size:10px;line-height:1.6;color:#738176;margin:10px 0}.arena-footer{flex-wrap:wrap}
+
+.nav-action{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:8px 12px;text-align:center}
+.team strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.panel-top h2{overflow-wrap:anywhere}
+.lobby-content{max-width:760px;margin:36px auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;align-items:start}
+.lobby-heading{grid-column:1 / -1;display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 20px}
+.lobby-status{margin:0;color:#526565;font-size:13px}
+.lobby-card{background:#fcfbf6;border:1px solid #daddd2;border-radius:12px;padding:22px;min-width:0}
+.lobby-card h2{font-size:19px;margin:0 0 16px}
+.lobby-form{display:grid;gap:8px}
+.lobby-form label,.room-code label{font-size:12px;font-weight:600}
+.lobby-form input,.room-code input{width:100%;min-width:0;padding:9px 10px;border:1px solid #d5dbd0;border-radius:6px;color:var(--ink);background:#fffef9;font-size:13px}
+.lobby-form .button,.lobby-card .button{margin-top:6px}
+.lobby-join{border-top:1px solid var(--line);margin-top:16px;padding-top:16px}
+.lobby-note{font-size:12px;line-height:1.5;margin:14px 0 4px;color:#526565}
+.room-code>div{display:flex;gap:7px;align-items:stretch;margin-top:8px}
+.room-code input{font-family:Consolas,monospace}
+.room-players{list-style:none;padding:0;margin:16px 0 0;display:grid;gap:6px}
+.room-players li{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);font-size:12px;color:#526565}
+.room-players strong{overflow-wrap:anywhere;color:var(--ink)}
+.room-players span{flex-shrink:0}
+@media(max-width:660px){.lobby-content{grid-template-columns:1fr;margin:24px auto}.lobby-card{padding:17px}}

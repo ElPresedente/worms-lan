@@ -7,15 +7,15 @@ import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { createGameServer, loadConfig, DEFAULT_CONFIG } from '../dist/index.js';
+import { createGameServer, createMatchServer, loadConfig, DEFAULT_CONFIG } from '../dist/index.js';
 import { TokenBucket, RequestIds, RateAbuse } from '../dist/limits.js';
 import { LIMITS, validateServerMessage } from '../../protocol/dist/index.js';
 
 const ORIGIN='http://127.0.0.1:4173';
 const request=(type,fields={})=>({protocolVersion:1,type,requestId:'req-1',...fields});
-async function fixture(t, options={}) {
+async function fixture(t, options={}, createServer=createGameServer) {
   const logs=[];
-  const server=createGameServer({config:{...DEFAULT_CONFIG,port:0},logger:entry=>logs.push(entry),...(!TCP?{httpServer:memoryHost()}:{}),...options});
+  const server=createServer({config:{...DEFAULT_CONFIG,port:0},logger:entry=>logs.push(entry),...(!TCP?{httpServer:memoryHost()}:{}),...options});
   const address=await server.start();t.after(()=>server.stop());
   return {server,logs,url:`ws://127.0.0.1:${address.port}/ws`,http:`http://127.0.0.1:${address.port}`,get:route=>(TCP?fetch:memoryGet)(`http://127.0.0.1:${address.port}`+route)};
 }
@@ -185,7 +185,7 @@ test('CLI help and invalid configuration work from project and package directori
     child.once('error',reject);child.once('close',code=>resolve({code,output}));
   });}
   for(const cwd of directories){
-    const help=await cli(['--help'],cwd);assert.equal(help.code,0,help.output);assert(help.output.includes('/ws'));
+    const help=await cli(['--help'],cwd);assert.equal(help.code,0,help.output);assert(help.output.includes('/ws'));assert(help.output.includes('(S1)'));
     const invalid=await cli(['--port','0'],cwd);assert.equal(invalid.code,1,invalid.output);assert(invalid.output.includes('Port must be 1..65535'));assert(!invalid.output.includes(' at '));
   }
 });
@@ -214,4 +214,230 @@ test('outgoing socket queue is bounded even when the peer stops reading',{skip:T
   c.send(request('room.create',{requestId:'backpressure'}));await delay(20);assert(refusedSend);assert(held);
   socket._write=original;original.call(socket,held.chunk,held.encoding,held.callback);
   assert.equal(await c.closed,1013);
+});
+
+async function receive(client, predicate) {
+  for (;;) {
+    const message = await client.next();
+    if (predicate(message)) return message;
+  }
+}
+
+function sendRequest(client, type, requestId, fields = {}) {
+  client.send(request(type, { requestId, ...fields }));
+  return receive(client, message => message.requestId === requestId);
+}
+
+async function createRoom(host) {
+  const result = await sendRequest(host, 'room.create', 'create');
+  assert.equal(result.ok, true);
+  assert.deepEqual(await host.next(), { protocolVersion: 1, type: 'room.state', room: result.room });
+  return result.room;
+}
+
+async function startMatch(host, guest) {
+  const { roomId } = await createRoom(host);
+  const join = await sendRequest(guest, 'room.join', 'join', { roomId });
+  assert.equal(join.ok, true);
+  assert.deepEqual((await host.next()).room, join.room);
+  assert.deepEqual((await guest.next()).room, join.room);
+
+  for (const player of [host, guest]) {
+    const ready = await sendRequest(player, 'room.ready', 'ready', { roomId, ready: true });
+    assert.equal(ready.ok, true);
+    assert.deepEqual((await host.next()).room, ready.room);
+    assert.deepEqual((await guest.next()).room, ready.room);
+  }
+
+  const starting = sendRequest(host, 'room.start', 'start', { roomId });
+  host.send(request('room.start', { requestId: 'second-start', roomId }));
+  const start = await starting;
+  const { matchId } = start;
+  assert.equal(start.ok, true);
+  assert.equal(start.revision, 0);
+  assert.notEqual(matchId, roomId);
+  const playing = await host.next();
+  assert.equal(playing.type, 'room.state');
+  assert.equal(playing.room.status, 'playing');
+  assert.equal(playing.room.matchId, matchId);
+  assert(playing.room.players.every(player => !player.ready && player.connected));
+  assert.deepEqual(await guest.next(), playing);
+  const initial = await host.next();
+  assert.equal(initial.type, 'game.update');
+  assert.equal(initial.revision, 0);
+  assert.equal(initial.state.phase, 'waiting');
+  assert.deepEqual(initial.events, []);
+  assert.deepEqual(await guest.next(), initial);
+  assert.equal((await host.next()).code, 'room-not-in-lobby');
+  return { roomId, matchId, initial };
+}
+
+test('S1 lobby serializes competing joins, resets readiness and transfers the host role', async t => {
+  const f = await fixture(t, {}, createMatchServer);
+  const host = await connect(t, f.url), first = await connect(t, f.url), second = await connect(t, f.url);
+  const [, firstIdentity, secondIdentity] = await Promise.all([hello(host), hello(first), hello(second)]);
+  assert.equal((await (await f.get('/health')).json()).stage, 'S1');
+  const { roomId, roomRevision } = await createRoom(host);
+  assert.equal(roomRevision, 1);
+  assert.equal((await sendRequest(host, 'room.create', 'another')).code, 'already-in-room');
+  const ready = await sendRequest(host, 'room.ready', 'ready', { roomId, ready: true });
+  assert.equal(ready.room.roomRevision, 2);
+  assert.deepEqual((await host.next()).room, ready.room);
+  const repeated = await sendRequest(host, 'room.ready', 'repeated', { roomId, ready: true });
+  assert.deepEqual(repeated.room, ready.room);
+  assert.equal((await sendRequest(host, 'room.start', 'premature', { roomId })).code, 'players-not-ready');
+  assert.equal((await sendRequest(host, 'game.snapshot', 'lobby-snapshot', { roomId, matchId: 'none' })).code, 'match-not-found');
+
+  const candidates = [[first, firstIdentity], [second, secondIdentity]];
+  const results = await Promise.all(candidates.map(([client]) => sendRequest(client, 'room.join', 'join', { roomId })));
+  assert.deepEqual(results.map(result => result.ok).sort(), [false, true]);
+  const index = results.findIndex(result => result.ok);
+  const [guest, guestIdentity] = candidates[index];
+  const [outside] = candidates[1 - index];
+  assert.equal(results[1 - index].code, 'room-full');
+  const joined = results[index].room;
+  assert.equal(joined.roomRevision, 3);
+  assert.deepEqual(joined.players.map(player => player.ready), [false, false]);
+  assert.deepEqual(await guest.next(), await host.next());
+  assert.equal((await sendRequest(guest, 'room.start', 'guest-start', { roomId })).code, 'not-host');
+  assert.equal((await sendRequest(outside, 'room.ready', 'outside-ready', { roomId, ready: true })).code, 'not-in-room');
+
+  const guestReady = await sendRequest(guest, 'room.ready', 'guest-ready', { roomId, ready: true });
+  assert.equal(guestReady.room.players[1].ready, true);
+  assert.deepEqual(await guest.next(), await host.next());
+  const left = await sendRequest(host, 'room.leave', 'leave', { roomId });
+  assert.equal(left.ok, true);
+  const promoted = await guest.next();
+  assert.equal(promoted.type, 'room.state');
+  assert.equal(promoted.room.hostPlayerId, guestIdentity.playerId);
+  assert.equal(promoted.room.roomRevision, 5);
+  assert.deepEqual(promoted.room.players.map(player => player.ready), [false]);
+
+  const rejoined = await sendRequest(outside, 'room.join', 'new-guest', { roomId });
+  assert.equal(rejoined.ok, true);
+  assert.deepEqual(await guest.next(), await outside.next());
+  guest.ws.close(1000);
+  const afterDisconnect = await outside.next();
+  assert.equal(afterDisconnect.room.players.length, 1);
+  assert.equal(afterDisconnect.room.hostPlayerId, afterDisconnect.room.players[0].playerId);
+  assert.equal((await sendRequest(outside, 'room.leave', 'empty', { roomId })).ok, true);
+  assert.equal((await sendRequest(host, 'room.join', 'after-close', { roomId })).code, 'room-not-found');
+});
+
+test('S1 room limit releases capacity after the last member leaves', async t => {
+  const f = await fixture(t, {}, createMatchServer);
+  const hosts = await Promise.all(Array.from({ length: LIMITS.maxRooms }, () => connect(t, f.url)));
+  await Promise.all(hosts.map(client => hello(client)));
+  const [first] = await Promise.all(hosts.map(createRoom));
+  const extra = await connect(t, f.url);
+  await hello(extra);
+  assert.equal((await sendRequest(extra, 'room.create', 'over-limit')).code, 'resource-limit');
+  assert.equal((await sendRequest(hosts[0], 'room.leave', 'free-slot', { roomId: first.roomId })).ok, true);
+  await createRoom(extra);
+});
+
+test('S1 two WebSockets play the same match through destruction, turn changes and victory', { timeout: 15000 }, async t => {
+  const f = await fixture(t, {}, createMatchServer);
+  const host = await connect(t, f.url), guest = await connect(t, f.url), outside = await connect(t, f.url);
+  const [hostIdentity, guestIdentity] = await Promise.all([hello(host), hello(guest), hello(outside)]);
+  const { roomId, matchId, initial } = await startMatch(host, guest);
+  const address = { roomId, matchId };
+  const command = (client, id, action, fields = {}) => sendRequest(client, 'game.command', id, {
+    commandId: 'cmd-' + id, ...address, ...fields, action,
+  });
+  assert.deepEqual(initial.state.players, [hostIdentity.playerId, guestIdentity.playerId]);
+  assert.equal(initial.state.terrain.width, 320);
+  assert.equal(initial.state.terrain.height, 180);
+  assert.equal(initial.state.turnDurationTicks, 3600);
+  await delay(150);
+  const waiting = await sendRequest(host, 'game.snapshot', 'waiting', address);
+  assert.equal(waiting.revision, 0);
+  assert.equal(waiting.state.tick, 0);
+  assert.equal(waiting.state.turnTicksRemaining, 0);
+  assert.equal((await sendRequest(outside, 'room.join', 'playing', { roomId })).code, 'room-not-joinable');
+  assert.equal((await command(outside, 'outside-action', { type: 'start-turn' })).rejection, 'not-in-room');
+  const mismatch = await command(host, 'wrong-match', { type: 'start-turn' }, { matchId: 'wrong' });
+  assert.equal(mismatch.rejection, 'match-mismatch');
+  assert.equal(mismatch.revision, null);
+  assert.equal((await command(guest, 'wrong-turn', { type: 'start-turn' })).rejection, 'wrong-player');
+  assert.equal((await command(host, 'fire-too-soon', { type: 'fire', angleDegrees: 90, power: 0 })).rejection, 'wrong-phase');
+
+  const started = await command(host, 'first-turn', { type: 'start-turn' });
+  assert.equal(started.accepted, true);
+  assert.equal(started.revision, 1);
+  const active = await receive(host, message => message.type === 'game.update' && message.state.tick >= 2);
+  assert.equal(active.state.phase, 'active');
+  assert.equal(active.state.turnTicksRemaining, 3600 - active.state.tick);
+  assert.equal(active.revision, active.state.tick + 1);
+  assert.deepEqual(await receive(guest, message => message.type === 'game.update' && message.revision === active.revision), active);
+
+  const fire = { type: 'fire', angleDegrees: 90, power: 0 };
+  const shot = await command(host, 'shot', fire);
+  assert.equal(shot.accepted, true);
+  const duplicate = await command(host, 'duplicate-shot', fire, { commandId: 'cmd-shot' });
+  assert.equal(duplicate.code, 'duplicate-id');
+  const resolving = await sendRequest(host, 'game.snapshot', 'resolving', address);
+  assert.equal(resolving.type, 'game.snapshot');
+  assert.equal(resolving.state.phase, 'resolving');
+  assert(resolving.revision >= shot.revision);
+  assert.deepEqual(resolving.events, []);
+
+  const following = message => message.type === 'game.update' && message.state.phase === 'waiting';
+  const seen = [];
+  let previous = active;
+  const nextTurn = await receive(guest, message => {
+    if (message.type === 'game.update') {
+      assert(message.revision > previous.revision);
+      // Unix time is stamped in whole milliseconds, so allow one millisecond of rounding.
+      assert(message.serverTimeMs - previous.serverTimeMs >= 99);
+      seen.push(...message.events);
+      previous = message;
+    }
+    return following(message);
+  });
+  assert.deepEqual(await receive(host, following), nextTurn);
+  assert.equal(nextTurn.state.players[nextTurn.state.activePlayerIndex], guestIdentity.playerId);
+  assert(nextTurn.state.worms[0].health < 100);
+  assert.notDeepEqual(nextTurn.state.terrain.cells, initial.state.terrain.cells);
+  assert.equal(seen.filter(event => event.type === 'shot-fired').length, 1);
+  assert(seen.some(event => event.type === 'explosion'));
+
+  assert.equal((await command(guest, 'guest-turn', { type: 'start-turn' })).accepted, true);
+  assert.equal((await command(guest, 'guest-pass', { type: 'end-turn' })).accepted, true);
+  assert.equal((await command(host, 'last-turn', { type: 'start-turn' })).accepted, true);
+  assert.equal((await command(host, 'last-shot', fire)).accepted, true);
+  const isFinished = message => message.type === 'game.update' && message.state.phase === 'finished';
+  const finished = await receive(host, isFinished);
+  assert.deepEqual(await receive(guest, isFinished), finished);
+  assert.equal(finished.state.winnerId, guestIdentity.playerId);
+  assert.deepEqual(finished.events.at(-1), { type: 'game-finished', winnerId: guestIdentity.playerId });
+  const finishedRoom = await host.next();
+  assert.equal(finishedRoom.type, 'room.state');
+  assert.equal(finishedRoom.room.status, 'finished');
+  assert.deepEqual(await guest.next(), finishedRoom);
+  assert.equal((await command(host, 'late-action', { type: 'start-turn' })).rejection, 'game-finished');
+  assert.equal((await sendRequest(host, 'room.start', 'restart', { roomId })).code, 'room-not-in-lobby');
+  assert.equal((await sendRequest(guest, 'room.leave', 'finished-leave', { roomId })).ok, true);
+  assert.deepEqual(await host.next(), { protocolVersion: 1, type: 'room.closed', ...address, reason: 'player-left' });
+  assert.equal((await sendRequest(host, 'game.snapshot', 'after-leave', address)).code, 'not-in-room');
+});
+
+test('S1 disconnect during flight closes the match and frees the remaining player', async t => {
+  const f = await fixture(t, {}, createMatchServer);
+  const host = await connect(t, f.url), guest = await connect(t, f.url);
+  await Promise.all([hello(host), hello(guest)]);
+  const { roomId, matchId } = await startMatch(host, guest);
+  const address = { roomId, matchId };
+  for (const action of [{ type: 'start-turn' }, { type: 'fire', angleDegrees: 90, power: 1 }]) {
+    const result = await sendRequest(host, 'game.command', 'flight-' + action.type, {
+      commandId: 'cmd-' + action.type, ...address, action,
+    });
+    assert.equal(result.accepted, true);
+  }
+  await receive(guest, message => message.type === 'game.update' && message.state.phase === 'resolving');
+  host.ws.terminate();
+  const closed = await receive(guest, message => message.type === 'room.closed');
+  assert.deepEqual(closed, { protocolVersion: 1, type: 'room.closed', ...address, reason: 'player-disconnected' });
+  assert.equal((await sendRequest(guest, 'room.join', 'closed-join', { roomId })).code, 'room-not-found');
+  assert.notEqual((await createRoom(guest)).roomId, roomId);
 });

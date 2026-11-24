@@ -18,6 +18,9 @@
     "paths": {
       "@office-worms/game-core": [
         "../game-core/dist/index.d.ts"
+      ],
+      "#protocol": [
+        "../protocol/dist/index.d.ts"
       ]
     }
   },

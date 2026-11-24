@@ -22,7 +22,7 @@ export interface ServerOptions {
   /** Optional HTTP/S host; this instance owns its listen/close lifecycle. Also supports stream-based transport tests. */
   httpServer?: HttpServer;
   logger?: Logger;
-  /** S1 supplies the authoritative room dispatcher. S0 refuses post-handshake requests explicitly. */
+  /** Optional application dispatcher. The standalone transport refuses post-handshake requests. */
   onRequest?: (request: AuthenticatedRequest, session: Session) => void | Promise<void>;
   onDisconnect?: (identity: Readonly<Identity>) => void;
 }
@@ -33,6 +33,10 @@ export interface GameServer {
 }
 /** A transport boundary, not a game simulation. Everything behind onRequest is authenticated and validated. */
 export function createGameServer(options: ServerOptions = {}): GameServer {
+  return createTransportServer(options, 'S0');
+}
+
+export function createTransportServer(options: ServerOptions, stage: 'S0' | 'S1'): GameServer {
   const config = validateConfig(options.config ?? DEFAULT_CONFIG, true);
   const logger = options.logger ?? jsonLogger;
   const log = (entry: Omit<LogEntry, 'time'>) => {
@@ -49,7 +53,7 @@ export function createGameServer(options: ServerOptions = {}): GameServer {
   http.on('request', (request, response) => {
     const healthy = request.method === 'GET' && request.url === '/health';
     response.writeHead(healthy ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
-    response.end(JSON.stringify(healthy ? { status: 'ok', protocolVersion: PROTOCOL_VERSION, stage: 'S0' } : { error: 'not-found' }));
+    response.end(JSON.stringify(healthy ? { status: 'ok', protocolVersion: PROTOCOL_VERSION, stage } : { error: 'not-found' }));
   });
   http.on('connection', (socket: Duplex) => {
     rawSockets.add(socket); socket.on('close', () => rawSockets.delete(socket));
