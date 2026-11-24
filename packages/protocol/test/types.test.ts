@@ -1,18 +1,18 @@
 import { LIMITS, parseClientMessage, parseServerMessage } from '../dist/index.js';
 import type { ClientMessage, ServerMessage, NetworkAction } from '../dist/index.js';
 
-const valid: ClientMessage = { protocolVersion: 1, type: 'game.command', requestId: 'r', roomId: 'room', matchId: 'match', commandId: 'cmd', action: { type: 'fire', angleDegrees: 90, power: 0.5 } };
+const valid: ClientMessage = { protocolVersion: 2, type: 'game.command', requestId: 'r', roomId: 'room', matchId: 'match', commandId: 'cmd', action: { type: 'fire', angleDegrees: 90, power: 0.5 } };
 void valid;
 // @ts-expect-error Identity belongs to the server, not a network action.
 const spoof: NetworkAction = { type: 'jump', playerId: 'other' };
 // @ts-expect-error Incomplete payload cannot be sent.
-const missing: ClientMessage = { protocolVersion: 1, type: 'room.join', requestId: 'r' };
+const missing: ClientMessage = { protocolVersion: 2, type: 'room.join', requestId: 'r' };
 // @ts-expect-error A success cannot carry a domain refusal.
-const invalidAck: ServerMessage = { protocolVersion: 1, type: 'command.result', requestId: 'r', commandId: 'cmd', matchId: 'match', accepted: true, revision: 1, rejection: 'wrong-player' };
+const invalidAck: ServerMessage = { protocolVersion: 2, type: 'command.result', requestId: 'r', commandId: 'cmd', matchId: 'match', accepted: true, revision: 1, rejection: 'wrong-player' };
 // @ts-expect-error Address refusals do not assert a revision of a different match.
-const invalidRevision: ServerMessage = { protocolVersion: 1, type: 'command.result', requestId: 'r', commandId: 'cmd', matchId: 'match', accepted: false, revision: 1, rejection: 'match-mismatch' };
+const invalidRevision: ServerMessage = { protocolVersion: 2, type: 'command.result', requestId: 'r', commandId: 'cmd', matchId: 'match', accepted: false, revision: 1, rejection: 'match-mismatch' };
 // @ts-expect-error A protocol error is not a game rejection.
-const wrongCode: ServerMessage = { protocolVersion: 1, type: 'error', requestId: null, code: 'wrong-player', message: 'x' };
+const wrongCode: ServerMessage = { protocolVersion: 2, type: 'error', requestId: null, code: 'wrong-player', message: 'x' };
 void [spoof, missing, invalidAck, invalidRevision, wrongCode];
 // @ts-expect-error Limits are immutable.
 LIMITS.tickHz = 30;

@@ -5,9 +5,9 @@ import { createGame, dispatch, step } from '../../game-core/dist/index.js';
 import { LIMITS, parseClientMessage, parseServerMessage, validateClientMessage, validateServerMessage } from '../dist/index.js';
 
 const fixtures = JSON.parse(readFileSync(new URL('../examples/exchanges.json', import.meta.url), 'utf8'));
-const client = (type, fields = {}) => ({ protocolVersion: 1, type, requestId: 'req-1', ...fields });
-const error = (fields = {}) => ({ protocolVersion: 1, type: 'error', requestId: null, code: 'invalid-message', message: 'Invalid message', ...fields });
-const snapshot = () => ({ protocolVersion: 1, type: 'game.update', roomId: 'room-1', matchId: 'match-1', revision: 0, serverTimeMs: 1792857600000, state: createGame({ players: ['player-1', 'player-2'] }), events: [] });
+const client = (type, fields = {}) => ({ protocolVersion: 2, type, requestId: 'req-1', ...fields });
+const error = (fields = {}) => ({ protocolVersion: 2, type: 'error', requestId: null, code: 'invalid-message', message: 'Invalid message', ...fields });
+const snapshot = () => ({ protocolVersion: 2, type: 'game.update', roomId: 'room-1', matchId: 'match-1', revision: 0, updateSequence: 0, serverTimeMs: 1792857600000, state: createGame({ players: ['player-1', 'player-2'] }), events: [] });
 const command = action => client('game.command', { roomId: 'room-1', matchId: 'match-1', commandId: 'cmd-1', action });
 function rejected(result, code = 'invalid-message') {
   assert.equal(result.ok, false, 'Input should have been rejected');
@@ -41,8 +41,8 @@ test('P0 finished broadcasts', () => {
 test('wrong direction, unknown type and unknown versions are distinct', () => {
   rejected(validateClientMessage(error()), 'unknown-type');
   rejected(validateServerMessage(client('hello', { displayName: 'Host' })), 'unknown-type');
-  rejected(validateClientMessage(client('hello', { protocolVersion: 2, displayName: 'Host' })), 'unsupported-version');
-  rejected(validateServerMessage(error({ protocolVersion: 2 })), 'unsupported-version');
+  rejected(validateClientMessage(client('hello', { protocolVersion: 1, displayName: 'Host' })), 'unsupported-version');
+  rejected(validateServerMessage(error({ protocolVersion: 1 })), 'unsupported-version');
   const s = snapshot(); s.state.version = 2;
   rejected(validateServerMessage(s), 'unsupported-state-version');
 });
@@ -107,7 +107,8 @@ test('unknown objects cannot smuggle non-JSON data, accessors or cycles', () => 
 test('full snapshot schema rejects broken maps, IDs, numbers and phase combinations', () => {
   const mutations = [
     s => { delete s.state.tick; }, s => { s.state.tick = 0.5; }, s => { s.state.tick = Number.MAX_SAFE_INTEGER + 1; },
-    s => { s.revision = -1; }, s => { s.serverTimeMs = NaN; }, s => { s.state.phase = 'cheating'; },
+    s => { s.revision = -1; }, s => { s.updateSequence = 1; }, s => { delete s.updateSequence; },
+    s => { s.serverTimeMs = NaN; }, s => { s.state.phase = 'cheating'; },
     s => { s.state.players[1] = s.state.players[0]; }, s => { s.state.players.push('player-3'); },
     s => { s.state.worms[0].playerId = 'player-3'; }, s => { s.state.worms[1].id = s.state.worms[0].id; },
     s => { s.state.worms[1].playerId = 'player-1'; }, s => { s.state.worms.pop(); },
@@ -155,15 +156,45 @@ test('room membership, host, readiness and match lifecycle invariants', () => {
   const message=structuredClone(fixtures.exchanges.find(e=>e.name==='join').responses[1]);
   for(const mutate of [r=>{r.players[1].playerId=r.players[0].playerId;},r=>{r.hostPlayerId='other';},r=>{r.players=[];},r=>{r.players[0].connected=false;},r=>{r.roomRevision=0;},r=>{r.matchId='match-1';},r=>{r.status='playing';},r=>{r.players[0].displayName='  ';}]) {const m=structuredClone(message);mutate(m.room);rejected(validateServerMessage(m));}
 });
+test('resume credentials stay on private messages and resumed snapshots match the authenticated seat', () => {
+  const resumeToken = 'A'.repeat(43);
+  assert.equal(validateClientMessage(client('hello', { resumeToken })).ok, true);
+  rejected(validateClientMessage(client('hello', { resumeToken, displayName: 'Host' })));
+  const invalid = rejected(validateClientMessage(client('hello', { resumeToken: 'private input' })));
+  assert(!JSON.stringify(invalid).includes('private input'));
+
+  const [join] = fixtures.exchanges.find(exchange => exchange.name === 'join').responses;
+  assert.equal(validateServerMessage({ ...join, resumeToken }).ok, true);
+  rejected(validateServerMessage({ ...join, room: { ...join.room, resumeToken } }));
+  const room = structuredClone(fixtures.exchanges.find(exchange => exchange.name === 'start').responses[1].room);
+  room.players[1].connected = false;
+  const roomUpdate = { protocolVersion: 2, type: 'room.state', room };
+  assert.equal(validateServerMessage(roomUpdate).ok, true);
+  rejected(validateServerMessage({ ...roomUpdate, resumeToken }));
+
+  const { protocolVersion, type, ...fields } = snapshot();
+  const restored = { ...fixtures.exchanges[0].responses[0], resumed: { room, snapshot: fields } };
+  assert.equal(validateServerMessage(restored).ok, true);
+  for (const change of [
+    message => { message.playerId = 'elsewhere'; },
+    message => { message.resumed.room.players[0].connected = false; },
+    message => { message.resumed.snapshot.matchId = 'other'; },
+    message => { message.resumed.snapshot.events.push({ type: 'turn-ready', playerId: 'player-1', turnNumber: 1 }); },
+  ]) {
+    const invalid = structuredClone(restored);
+    change(invalid);
+    rejected(validateServerMessage(invalid));
+  }
+});
 test('results distinguish format errors, domain refusals and command acceptance', () => {
-  const ack={protocolVersion:1,type:'command.result',requestId:'req-1',commandId:'cmd-1',matchId:'match-1',accepted:true,revision:1};
+  const ack={protocolVersion:2,type:'command.result',requestId:'req-1',commandId:'cmd-1',matchId:'match-1',accepted:true,revision:1};
   assert.equal(validateServerMessage(ack).ok,true);
   for(const rejection of ['game-finished','wrong-player','wrong-phase','invalid-action']) assert.equal(validateServerMessage({...ack,accepted:false,rejection}).ok,true);
   for(const rejection of ['not-in-room','match-not-found','match-mismatch']) assert.equal(validateServerMessage({...ack,accepted:false,revision:null,rejection}).ok,true);
   for(const bad of [{...ack,revision:null},{...ack,rejection:'wrong-player'},{...ack,accepted:false},{...ack,accepted:false,rejection:'match-mismatch'},{...ack,accepted:false,revision:null,rejection:'wrong-phase'}]) rejected(validateServerMessage(bad));
-  rejected(validateServerMessage({protocolVersion:1,type:'result',requestId:'r',requestType:'room.start',ok:true,matchId:'m',revision:1}));
-  rejected(validateServerMessage({protocolVersion:1,type:'result',requestId:'r',requestType:'room.create',ok:false,code:'not-host'}));
-  rejected(validateServerMessage({protocolVersion:1,type:'result',requestId:'r',requestType:'game.snapshot',ok:true}));
+  rejected(validateServerMessage({protocolVersion:2,type:'result',requestId:'r',requestType:'room.start',ok:true,matchId:'m',revision:1}));
+  rejected(validateServerMessage({protocolVersion:2,type:'result',requestId:'r',requestType:'room.create',ok:false,code:'not-host'}));
+  rejected(validateServerMessage({protocolVersion:2,type:'result',requestId:'r',requestType:'game.snapshot',ok:true}));
   rejected(validateServerMessage(error({code:'wrong-player'})));
   rejected(validateServerMessage(error({message:'🙂'.repeat(257)})));
 });
@@ -193,6 +224,6 @@ test('genuine core transitions validate throughout movement, timeout, projectile
 });
 test('arbitrary deterministic JSON never escapes either validator', () => {
   let seed=12345;const random=()=>((seed=(Math.imul(seed,1664525)+1013904223)>>>0)/2**32);
-  const value=depth=>{const n=Math.floor(random()*(depth?7:5));if(n===0)return null;if(n===1)return random()*100;if(n===2)return random()<0.5;if(n===3)return '🙂'+random();if(n===4)return {};if(n===5)return [value(depth-1),value(depth-1)];return {protocolVersion:1,type:random()<0.5?'hello':'error',requestId:'r',nested:value(depth-1)};};
+  const value=depth=>{const n=Math.floor(random()*(depth?7:5));if(n===0)return null;if(n===1)return random()*100;if(n===2)return random()<0.5;if(n===3)return '🙂'+random();if(n===4)return {};if(n===5)return [value(depth-1),value(depth-1)];return {protocolVersion:2,type:random()<0.5?'hello':'error',requestId:'r',nested:value(depth-1)};};
   for(let i=0;i<250;i++){const v=value(4);for(const validate of [validateClientMessage,validateServerMessage])assert.equal(typeof validate(v).ok,'boolean');for(const parse of [parseClientMessage,parseServerMessage])assert.equal(typeof parse(JSON.stringify(v)).ok,'boolean');}
 });

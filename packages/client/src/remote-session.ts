@@ -21,6 +21,7 @@ export class RemoteSession implements GameSession {
   private movesInFlight = 0;
   private queuedMove: QueuedMove | undefined;
   private recovering: Promise<boolean> | undefined;
+  private connected = true;
   private disposed = false;
 
   constructor(
@@ -29,12 +30,12 @@ export class RemoteSession implements GameSession {
     private readonly request: (request: GameRequest) => Promise<Reply>,
   ) {
     this.current = initial;
-    this.lastBroadcast = initial.type === 'game.update' ? initial.revision : -1;
+    this.lastBroadcast = initial.updateSequence;
   }
 
   get state() { return this.current.state; }
   get canControl(): boolean {
-    return !this.disposed && this.state.players[this.state.activePlayerIndex] === this.playerId;
+    return this.connected && !this.disposed && this.state.players[this.state.activePlayerIndex] === this.playerId;
   }
 
   canCommand(type: NetworkAction['type']): boolean {
@@ -60,7 +61,7 @@ export class RemoteSession implements GameSession {
     this.locked.set(type, Infinity);
     this.publish();
     const reply = await this.send(action);
-    if (this.disposed || this.state.turnNumber !== turn) return this.outcome(reply);
+    if (!this.connected || this.disposed || this.state.turnNumber !== turn) return this.outcome(reply);
     if (reply.type === 'command.result' && reply.accepted && reply.revision > this.current.revision) {
       this.locked.set(type, reply.revision);
     } else if (reply.type === 'unknown' && this.state.phase === (type === 'start-turn' ? 'waiting' : 'active')) {
@@ -73,11 +74,13 @@ export class RemoteSession implements GameSession {
     return this.outcome(reply);
   }
 
-  accept(message: Snapshot): void {
+  accept(message: Snapshot, resynced = false): void {
     if (this.disposed || this.current.matchId !== message.matchId || this.current.roomId !== message.roomId ||
         message.revision < this.current.revision) return;
-    if (message.type === 'game.update' && message.revision <= this.lastBroadcast) return;
-    if (message.type === 'game.update') this.lastBroadcast = message.revision;
+    const broadcast = message.type === 'game.update';
+    if (broadcast && message.updateSequence <= this.lastBroadcast) return;
+    const missedUpdate = broadcast && message.updateSequence > this.lastBroadcast + 1;
+    if (broadcast) this.lastBroadcast = message.updateSequence;
 
     const previous = this.state;
     const changed = message.revision > this.current.revision;
@@ -93,11 +96,26 @@ export class RemoteSession implements GameSession {
     for (const [type, revision] of this.locked) {
       if (revision <= message.revision) this.locked.delete(type);
     }
-    this.publish(message.events, terrainChanged);
+    this.publish(message.events, terrainChanged, resynced || missedUpdate);
+    if (missedUpdate) void this.refresh();
+  }
+
+  suspend(): void {
+    this.connected = false;
+    this.locked.clear();
+    this.uncertain.clear();
+    this.discardQueuedMove();
+    this.publish();
+  }
+
+  resume(message: Extract<Snapshot, { type: 'game.snapshot' }>): void {
+    this.connected = true;
+    this.lastBroadcast = message.updateSequence;
+    this.accept(message, true);
   }
 
   refresh(): Promise<boolean> {
-    if (this.disposed) return Promise.resolve(false);
+    if (!this.connected || this.disposed) return Promise.resolve(false);
     return this.recovering ??= this.requestSnapshot();
   }
 
@@ -159,7 +177,7 @@ export class RemoteSession implements GameSession {
     this.queuedMove = undefined;
   }
 
-  private publish(events: Update['events'] = [], terrainChanged = false): void {
-    for (const listener of this.listeners) listener({ state: this.state, events, terrainChanged, reset: false });
+  private publish(events: Update['events'] = [], terrainChanged = false, resynced = false): void {
+    for (const listener of this.listeners) listener({ state: this.state, events, terrainChanged, resynced, reset: false });
   }
 }

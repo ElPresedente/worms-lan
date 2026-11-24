@@ -1,5 +1,5 @@
 import { LIMITS, PROTOCOL_VERSION, STATE_VERSION, PROTOCOL_ERROR_CODES, ADDRESS_REJECTIONS, CORE_REJECTIONS, REQUEST_REJECTIONS } from './constants.js';
-import type { ClientMessage, ServerMessage, ValidationResult, ValidationError, ProtocolErrorCode, ValidationContext } from './types.js';
+import type { ClientMessage, Room, ServerMessage, SnapshotFields, ValidationResult, ValidationError, ProtocolErrorCode, ValidationContext } from './types.js';
 import type { GameState, GameEvent } from '@office-worms/game-core';
 
 type Check = (value: unknown, path: string) => void;
@@ -31,6 +31,7 @@ const number = (min: number, max: number, integer = false): Check => (v, p) => {
 const uint = number(0, Number.MAX_SAFE_INTEGER, true);
 const positive = number(1, Number.MAX_SAFE_INTEGER, true);
 const id: Check = (v, p) => { if (typeof v !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(v)) fail(p, 'Invalid ID'); };
+const resumeToken: Check = (v, p) => { if (typeof v !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(v)) fail(p, 'Invalid resume token'); };
 const nullable = (check: Check): Check => (v, p) => { if (v !== null) check(v, p); };
 const array = (check: Check, min: number, max: number): Check => (v, p) => {
   if (!Array.isArray(v) || v.length < min || v.length > max) fail(p, 'Array outside allowed length');
@@ -79,10 +80,11 @@ const room: Check = (v, p) => {
   exact({ roomId: id, roomRevision: positive, hostPlayerId: id, status: oneOf(['lobby', 'playing', 'finished']),
     players: array(exact({ playerId: id, displayName: displayName(true), ready: bool, connected: bool }), 1, 2), matchId: nullable(id),
   })(v, p);
-  const r = v as import('./types.js').Room;
+  const r = v as Room;
   if (new Set(r.players.map(x => x.playerId)).size !== r.players.length || r.players[0]?.playerId !== r.hostPlayerId) fail(p, 'Invalid room membership or host');
-  if (r.players.some(x => !x.connected)) fail(p, 'M2 does not retain disconnected players');
-  if (r.status === 'lobby') { if (r.matchId !== null) fail(`${p}.matchId`, 'Lobby cannot have match'); }
+  if (r.status === 'lobby') {
+    if (r.matchId !== null || r.players.some(x => !x.connected)) fail(p, 'Invalid lobby');
+  }
   else if (r.matchId === null || r.players.length !== 2 || r.players.some(x => x.ready)) fail(p, 'Invalid started room');
 };
 const action: Check = (v, p) => {
@@ -123,7 +125,10 @@ const request = { ...base, requestId: id };
 function clientCheck(v: unknown, p: string): void {
   const o = record(v, p), fields = { ...request, type: literal(o.type as string) };
   switch (o.type) {
-    case 'hello': exact({ ...fields, displayName: displayName(false) })(v, p); break;
+    case 'hello': {
+      exact(Object.hasOwn(o, 'resumeToken') ? { ...fields, resumeToken } : { ...fields, displayName: displayName(false) })(v, p);
+      break;
+    }
     case 'room.create': exact(fields)(v, p); break;
     case 'room.join': case 'room.leave': case 'room.start': exact({ ...fields, roomId: id })(v, p); break;
     case 'room.ready': exact({ ...fields, roomId: id, ready: bool })(v, p); break;
@@ -141,18 +146,39 @@ function resultCheck(v: unknown, p: string): void {
     exact({ ...fields, code: oneOf(REQUEST_REJECTIONS[type]) })(v, p); return;
   }
   switch (type) {
-    case 'room.create': case 'room.join': case 'room.ready': exact({ ...fields, ok: literal(true), room })(v, p); break;
+    case 'room.create': case 'room.join':
+      exact({ ...fields, ok: literal(true), room, ...(Object.hasOwn(o, 'resumeToken') ? { resumeToken } : {}) })(v, p); break;
+    case 'room.ready': exact({ ...fields, ok: literal(true), room })(v, p); break;
     case 'room.leave': exact({ ...fields, ok: literal(true) })(v, p); break;
     case 'room.start': exact({ ...fields, ok: literal(true), matchId: id, revision: literal(0) })(v, p); break;
     default: fail(p, 'Snapshot success must use game.snapshot');
   }
 }
+function snapshotCheck(v: unknown, p: string, fields: Record<string, Check>, maxEvents: number, currentRoom?: Room): void {
+  exact({ ...fields, roomId: id, matchId: id, revision: uint, updateSequence: uint, serverTimeMs: uint,
+    state, events: array(event, 0, maxEvents) })(v, p);
+  const snapshot = v as SnapshotFields;
+  if (snapshot.updateSequence > snapshot.revision) fail(`${p}.updateSequence`, 'Update sequence exceeds revision');
+  checkEventReferences(snapshot.events, snapshot.state, `${p}.events`);
+  if (currentRoom && (snapshot.roomId !== currentRoom.roomId || snapshot.matchId !== currentRoom.matchId ||
+    snapshot.state.players.some((player, i) => player !== currentRoom.players[i]?.playerId))) fail(p, 'Snapshot does not belong to current room');
+}
 function serverCheck(v: unknown, p: string, context: ValidationContext): void {
   const o = record(v, p), fields = { ...base, type: literal(o.type as string) };
   switch (o.type) {
-    case 'welcome': exact({ ...fields, requestId: id, connectionId: id, playerId: id, displayName: displayName(true), serverTimeMs: uint,
-      limits: exact(Object.fromEntries(Object.entries(LIMITS).map(([key, value]) => [key, literal(value)]))),
-    })(v, p); break;
+    case 'welcome': {
+      const resumed: Check = (value, path) => {
+        const data = record(value, path);
+        exact({ room, snapshot: (snapshot, at) => snapshotCheck(snapshot, at, {}, 0, data.room as Room) })(value, path);
+        const member = (data.room as Room).players.find(player => player.playerId === o.playerId);
+        if (!member?.connected || member.displayName !== o.displayName) fail(path, 'Incorrect resumed member');
+      };
+      exact({ ...fields, requestId: id, connectionId: id, playerId: id, displayName: displayName(true), serverTimeMs: uint,
+        limits: exact(Object.fromEntries(Object.entries(LIMITS).map(([key, value]) => [key, literal(value)]))),
+        ...(Object.hasOwn(o, 'resumed') ? { resumed } : {}),
+      })(v, p);
+      break;
+    }
     case 'result': resultCheck(v, p); break;
     case 'room.state': exact({ ...fields, room })(v, p); break;
     case 'room.closed': exact({ ...fields, roomId: id, matchId: id, reason: oneOf(['player-left', 'player-disconnected']) })(v, p); break;
@@ -165,13 +191,8 @@ function serverCheck(v: unknown, p: string, context: ValidationContext): void {
       break;
     }
     case 'game.update': case 'game.snapshot': {
-      exact({ ...fields, ...(o.type === 'game.snapshot' ? { requestId: id } : {}), roomId: id, matchId: id, revision: uint, serverTimeMs: uint,
-        state, events: array(event, 0, o.type === 'game.snapshot' ? 0 : LIMITS.maxEventsPerUpdate),
-      })(v, p);
-      const update = v as Extract<ServerMessage, { type: 'game.update' }>;
-      checkEventReferences(update.events, update.state, `${p}.events`);
-      if (context.room && (update.roomId !== context.room.roomId || update.matchId !== context.room.matchId ||
-        update.state.players.some((player, i) => player !== context.room!.players[i]?.playerId))) fail(p, 'Snapshot does not belong to current room');
+      const isSnapshot = o.type === 'game.snapshot';
+      snapshotCheck(v, p, isSnapshot ? { ...fields, requestId: id } : fields, isSnapshot ? 0 : LIMITS.maxEventsPerUpdate, context.room);
       break;
     }
     case 'error': exact({ ...fields, requestId: nullable(id), code: oneOf(PROTOCOL_ERROR_CODES), message: (value, at) => {

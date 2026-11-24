@@ -6,6 +6,7 @@ export interface Update {
   events: readonly GameEvent[];
   reset: boolean;
   terrainChanged?: boolean;
+  resynced?: boolean;
 }
 export type CommandOutcome =
   | { kind: 'accepted' | 'unknown' | 'skipped' }

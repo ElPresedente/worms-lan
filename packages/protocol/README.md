@@ -1,7 +1,7 @@
 # protocol
 
 `@office-worms/protocol` — общий TypeScript-контракт и runtime-проверки сетевой партии.
-P0/P1 готовы. [Спецификация v1](SPEC.md) задаёт формат; [ROADMAP](ROADMAP.md) — следующие этапы.
+P0–P2 готовы. Формат сообщений и порядок восстановления описаны в спецификации. [Контракт v2](SPEC.md), [дорожная карта](ROADMAP.md)
 
 Пакет не использует Node.js, DOM, WebSocket API или сторонние runtime-библиотеки.
 Типы Action/GameState/GameEvent импортируются из game-core через `import type`;
@@ -21,14 +21,14 @@ if (!result.ok) {
   // S0 выбирает ответ/close по SPEC.md. Невалидное сообщение не передаётся ядру.
 } else if (result.value.type === 'game.command') {
   const command = result.value;
-  // S0/S1 проверяет handshake/членство/ID, затем подставляет session.playerId.
+  // Сервер проверяет сессию, комнату и ID команды, затем подставляет session.playerId.
   // dispatch(state, {...command.action, playerId: session.playerId});
 }
 
 // Граница клиента, дополнительно сверяем снимок с уже известной комнатой:
 const incoming = parseServerMessage(serverText, { room: currentRoom });
 if (incoming.ok) {
-  // C2 применяет актуальные revision текущего matchId и завершает pending-запросы.
+  // Клиент применяет актуальные снимки текущего matchId и завершает ожидающие запросы.
 }
 
 // Уже разобранный JSON или исходящий DTO проверяются теми же схемами:
@@ -49,14 +49,14 @@ welcome/Room требуют уже нормализованное имя.
 CommandResult, SnapshotFields, RequestSuccess/RequestFailure, ValidationResult,
 ValidationError, ValidationContext, Limits и коды отказов.
 Константы: PROTOCOL_VERSION, STATE_VERSION, LIMITS, PROTOCOL_ERROR_CODES,
-CORE_REJECTIONS, ADDRESS_REJECTIONS, REQUEST_REJECTIONS.
+CORE_REJECTIONS, ADDRESS_REJECTIONS, REQUEST_REJECTIONS, RESUME_RETENTION_MS, MAX_MATCH_COMMANDS_PER_PLAYER.
 
 Ошибки формата возвращаются как ValidationError; игровые отказы — валидные
 command.result accepted=false. Отказы лобби — result ok=false, а не ошибки парсинга.
 При невозможности извлечь корректный requestId error.requestId равен null.
 
 Проверки статичны: handshake, очередь команд, повтор ID, token bucket, timeout,
-текущая revision, серверное время и очередь исходящих байтов исполняются в S0/S1/C2/P2.
+текущая revision, серверное время и очередь исходящих байтов обслуживаются клиентом и сервером.
 Context.room проверяет roomId/matchId/порядок игроков только для снимков; это не авторизация.
 Пакет не отправляет сообщения, не закрывает сокеты и не запускает симуляцию.
 
@@ -75,8 +75,7 @@ npm test --workspace=@office-worms/protocol
 ручной Node.js-импорт выполняется по пути `./packages/protocol/dist/index.js` из корня;
 импорт по имени @office-worms/protocol требует установленной workspace-ссылки.
 
-Сборка выпускает ESM и .d.ts в dist. Тесты проверяют все JSON-обмены P0,
+Сборка выпускает ESM и .d.ts в dist. Тесты проверяют JSON-примеры v2,
 негативные примеры, обе границы, UTF-8-лимиты, повреждённые снимки,
-подмену playerId, варианты отказов, реальные переходы ядра до finished и timeout.
+подмену playerId, варианты отказов, состояние после восстановления и переходы ядра до finished и timeout.
 TypeScript-проверка тестирует запрет playerId в NetworkAction и сужение union-результатов.
-Сеть и визуальная приёмка — S0/S1/C2.

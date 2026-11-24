@@ -1,8 +1,20 @@
-import { LIMITS } from '#protocol';
+import { LIMITS, PROTOCOL_VERSION, validateClientMessage } from '#protocol';
 import { mountGame } from './app.js';
 import { RoomConnection, websocketAddress, type Reply } from './connection.js';
 import { rejectionMessage } from './messages.js';
 import type { RemoteSession } from './remote-session.js';
+
+const seatKey = 'office-worms.match.v2';
+
+function readSeat(): { url: string; name: string; token: string } | undefined {
+  try {
+    const { url, name, token } = JSON.parse(sessionStorage.getItem(seatKey) ?? 'null') ?? {};
+    if (typeof url !== 'string' || typeof name !== 'string' || typeof token !== 'string') return;
+    if (validateClientMessage({ protocolVersion: PROTOCOL_VERSION, type: 'hello', requestId: 'restore', resumeToken: token }).ok) {
+      return { url: websocketAddress(url), name, token };
+    }
+  } catch { /* The game can reconnect in memory when storage is unavailable. */ }
+}
 
 function failure(reply: Reply): string {
   if (reply.type === 'error' || (reply.type === 'result' && !reply.ok)) return rejectionMessage(reply.code);
@@ -76,6 +88,8 @@ export function mountOnline(root: HTMLElement): () => void {
   let session: RemoteSession | undefined;
   let app: ReturnType<typeof mountGame> | undefined;
   let busy = false;
+  const seat = readSeat();
+  let savedToken = seat?.token;
 
   function error(text: string): void {
     const node = el('lobby-error');
@@ -84,7 +98,7 @@ export function mountOnline(root: HTMLElement): () => void {
 
   async function run(request: Parameters<RoomConnection['lobby']>[0]): Promise<string> {
     const active = connection;
-    if (!active || busy) return '';
+    if (active?.status !== 'ready' || busy) return '';
     error('');
     busy = true;
     render();
@@ -103,33 +117,55 @@ export function mountOnline(root: HTMLElement): () => void {
   function render(): void {
     const match = connection?.match;
     const room = connection?.room;
+    const status = connection?.status ?? 'disconnected';
+    const connected = status === 'ready';
+    const reconnecting = status === 'reconnecting';
+    const pending = status === 'connecting' || reconnecting;
+    const token = connection?.resumeToken;
+    if (savedToken !== token) {
+      savedToken = token;
+      try {
+        if (token) sessionStorage.setItem(seatKey, JSON.stringify({ url: address.value, name: displayName.value, token }));
+        else sessionStorage.removeItem(seatKey);
+      } catch { /* Saving the seat across reloads is best effort. */ }
+    }
     if (session !== match) {
       app?.destroy();
       session = match;
       app = match && room ? mountGame(game, match, undefined, {
         playerId: match.playerId,
         names: new Map(room.players.map(player => [player.playerId, player.displayName])),
-        leave: () => run({ type: 'room.leave', roomId: room.roomId }),
+        leave: async () => {
+          if (connection?.status === 'reconnecting') {
+            connection.disconnect('Вы отменили восстановление соединения.');
+            return '';
+          }
+          return run({ type: 'room.leave', roomId: room.roomId });
+        },
         refresh: () => match.refresh(),
       }) : undefined;
     }
     lobby.hidden = Boolean(match);
     game.hidden = !match;
-    if (match) return;
+    if (match) {
+      const opponentAway = room?.players.some(player => player.playerId !== match.playerId && !player.connected);
+      app?.setConnectionStatus(reconnecting ? 'Переподключаемся…' : opponentAway ? 'Соперник отключился' : 'Сетевая партия', reconnecting);
+      return;
+    }
 
-    const status = connection?.status ?? 'disconnected';
-    const connected = status === 'ready';
-    const connecting = status === 'connecting';
-    el('connection-status').textContent = ({ connecting: 'Подключаемся…', ready: 'Подключено', disconnected: 'Нет подключения' })[status];
+    el('connection-status').textContent = ({ connecting: 'Подключаемся…', reconnecting: 'Восстанавливаем матч…',
+      ready: 'Подключено', disconnected: 'Нет подключения' })[status];
     const notice = el('lobby-notice');
     notice.textContent = connection?.notice ?? '';
     notice.hidden = !notice.textContent;
-    address.disabled = displayName.disabled = connectButton.disabled = connecting || connected;
+    address.disabled = displayName.disabled = connectButton.disabled = pending || connected;
     connectButton.hidden = connected;
-    connectButton.textContent = connecting ? 'Подключаемся…' : 'Подключиться';
-    el('disconnect').hidden = !connected && !connecting;
+    connectButton.textContent = pending ? 'Подключаемся…' : 'Подключиться';
+    const disconnect = el('disconnect');
+    disconnect.hidden = !connected && !pending;
+    disconnect.textContent = reconnecting ? 'Отменить восстановление' : 'Отключиться от сервера';
     el('room-actions').hidden = !connected || Boolean(room);
-    el('room-details').hidden = !room;
+    el('room-details').hidden = !connected || !room;
     for (const id of ['create-room', 'join-room', 'room-leave']) el<HTMLButtonElement>(id).disabled = busy;
     if (!room) return;
 
@@ -162,6 +198,20 @@ export function mountOnline(root: HTMLElement): () => void {
       'Для запуска оба игрока должны отметить готовность.';
   }
 
+  function connect(url: string, name: string, token?: string): void {
+    try {
+      const next = new RoomConnection(() => new WebSocket(url), name, token ? { resumeToken: token } : {});
+      unsubscribe?.();
+      connection = next;
+      busy = false;
+      address.value = url;
+      displayName.value = name;
+      unsubscribe = next.subscribe(render);
+    } catch {
+      error('Не удалось открыть соединение. Проверьте адрес и настройки страницы.');
+    }
+  }
+
   on(el('connect-form'), 'submit', event => {
     event.preventDefault();
     if (connection && connection.status !== 'disconnected') return;
@@ -174,16 +224,7 @@ export function mountOnline(root: HTMLElement): () => void {
     let url: string;
     try { url = websocketAddress(address.value); }
     catch { error('Укажите WebSocket-адрес вида ws://адрес:4180/ws.'); return; }
-    try {
-      const next = new RoomConnection(new WebSocket(url), name);
-      unsubscribe?.();
-      connection = next;
-      busy = false;
-      address.value = url;
-      unsubscribe = next.subscribe(render);
-    } catch {
-      error('Не удалось открыть соединение. Проверьте адрес и настройки страницы.');
-    }
+    connect(url, name);
   });
   on(el('disconnect'), 'click', () => { error(''); connection?.disconnect('Вы отключились от сервера.'); });
   on(el('create-room'), 'click', () => { void submit({ type: 'room.create' }); });
@@ -216,7 +257,11 @@ export function mountOnline(root: HTMLElement): () => void {
     notice.hidden = false;
   });
 
-  render();
+  on(document, 'visibilitychange', () => { if (!document.hidden) connection?.resync(); });
+  on(window, 'online', () => connection?.resync());
+
+  if (seat) connect(seat.url, seat.name, seat.token);
+  else render();
   return () => {
     abort.abort();
     unsubscribe?.();

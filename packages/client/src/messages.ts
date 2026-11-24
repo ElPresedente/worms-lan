@@ -18,6 +18,7 @@ const errors: Record<string, string> = {
   'invalid-message': 'Проверьте введённые данные.',
   'not-implemented': 'На этом сервере недоступны сетевые комнаты.',
   'internal-error': 'Сервер не смог обработать запрос.',
+  'command-id-conflict': 'Номер команды уже использован для другого действия.',
 };
 
 export function rejectionMessage(code: string): string {

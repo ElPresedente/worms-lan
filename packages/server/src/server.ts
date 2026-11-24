@@ -17,6 +17,10 @@ export interface Session {
   send(message: ServerMessage): boolean;
   close(code?: number): void;
 }
+type Welcome = Extract<ServerMessage, { type: 'welcome' }>;
+type PlayerIdentity = Pick<Identity, 'playerId' | 'displayName'>;
+export type ResumeSeat = { player: PlayerIdentity; restore(session: Session): NonNullable<Welcome['resumed']> } |
+  { code: 'resume-unavailable' | 'resume-in-use' };
 export interface ServerOptions {
   config?: ServerConfig;
   /** Optional HTTP/S host; this instance owns its listen/close lifecycle. Also supports stream-based transport tests. */
@@ -25,6 +29,7 @@ export interface ServerOptions {
   /** Optional application dispatcher. The standalone transport refuses post-handshake requests. */
   onRequest?: (request: AuthenticatedRequest, session: Session) => void | Promise<void>;
   onDisconnect?: (identity: Readonly<Identity>) => void;
+  onResume?: (token: string) => ResumeSeat;
 }
 export interface GameServer {
   start(): Promise<AddressInfo>;
@@ -36,7 +41,7 @@ export function createGameServer(options: ServerOptions = {}): GameServer {
   return createTransportServer(options, 'S0');
 }
 
-export function createTransportServer(options: ServerOptions, stage: 'S0' | 'S1'): GameServer {
+export function createTransportServer(options: ServerOptions, stage: 'S0' | 'S2'): GameServer {
   const config = validateConfig(options.config ?? DEFAULT_CONFIG, true);
   const logger = options.logger ?? jsonLogger;
   const log = (entry: Omit<LogEntry, 'time'>) => {
@@ -172,7 +177,7 @@ export function createTransportServer(options: ServerOptions, stage: 'S0' | 'S1'
       }
       const request = parsed.value;
       if (request.type === 'game.snapshot' && !this.snapshots.take(now)) { this.rateLimit(now, request.requestId); return; }
-      const reserved = this.ids.reserve(request.requestId, request.type === 'game.command' ? request.commandId : undefined);
+      const reserved = this.ids.reserve(request.requestId, stage === 'S0' && request.type === 'game.command' ? request.commandId : undefined);
       if (reserved !== 'accepted') {
         this.reject(request.requestId, reserved);
         if (reserved === 'resource-limit') this.close(1008);
@@ -180,10 +185,13 @@ export function createTransportServer(options: ServerOptions, stage: 'S0' | 'S1'
       }
       if (!this.identity) {
         if (request.type !== 'hello') { this.reject(request.requestId, 'handshake-required'); return; }
-        this.identity = Object.freeze({ connectionId: this.connectionId, playerId: randomUUID(), displayName: request.displayName.trim() });
-        clearTimeout(this.helloTimer);
-        this.send({ protocolVersion: PROTOCOL_VERSION, type: 'welcome', requestId: request.requestId, ...this.identity, serverTimeMs: Date.now(), limits: LIMITS });
-        log({ event: 'handshake-completed', connectionId: this.connectionId, playerId: this.identity.playerId });
+        if ('resumeToken' in request) {
+          const seat = options.onResume?.(request.resumeToken) ?? { code: 'resume-unavailable' };
+          if ('code' in seat) this.reject(request.requestId, seat.code);
+          else this.welcome(request.requestId, seat.player, seat.restore);
+        } else {
+          this.welcome(request.requestId, { playerId: randomUUID(), displayName: request.displayName.trim() });
+        }
         return;
       }
       if (request.type === 'hello') { this.reject(request.requestId, 'already-initialized'); return; }
@@ -194,11 +202,25 @@ export function createTransportServer(options: ServerOptions, stage: 'S0' | 'S1'
       this.queue.push({ request, bytes: buffer.byteLength }); this.queuedBytes += buffer.byteLength;
       void this.drain();
     }
+
+    private welcome(requestId: string, player: PlayerIdentity,
+      restore?: (session: Session) => NonNullable<Welcome['resumed']>): void {
+      this.identity = Object.freeze({ connectionId: this.connectionId, ...player });
+      clearTimeout(this.helloTimer);
+      const resumed = restore?.(this.session(this.identity));
+      this.send({ protocolVersion: PROTOCOL_VERSION, type: 'welcome', requestId, ...this.identity,
+        serverTimeMs: Date.now(), limits: LIMITS, ...(resumed ? { resumed } : {}) });
+      log({ event: 'handshake-completed', connectionId: this.connectionId, playerId: player.playerId });
+    }
+
+    private session(identity: Identity): Session {
+      return Object.freeze({ identity, send: (message: ServerMessage) => this.send(message), close: (code?: number) => this.close(code) });
+    }
+
     private async drain(): Promise<void> {
       if (this.processing || this.closing || !this.identity) return;
       this.processing = true;
-      const identity = this.identity;
-      const session: Session = Object.freeze({ identity, send: (message: ServerMessage) => this.send(message), close: (code?: number) => this.close(code) });
+      const session = this.session(this.identity);
       try {
         while (!this.closing && this.queue.length) {
           const item = this.queue.shift()!;

@@ -12,7 +12,7 @@ import { TokenBucket, RequestIds, RateAbuse } from '../dist/limits.js';
 import { LIMITS, validateServerMessage } from '../../protocol/dist/index.js';
 
 const ORIGIN='http://127.0.0.1:4173';
-const request=(type,fields={})=>({protocolVersion:1,type,requestId:'req-1',...fields});
+const request=(type,fields={})=>({protocolVersion:2,type,requestId:'req-1',...fields});
 async function fixture(t, options={}, createServer=createGameServer) {
   const logs=[];
   const server=createServer({config:{...DEFAULT_CONFIG,port:0},logger:entry=>logs.push(entry),...(!TCP?{httpServer:memoryHost()}:{}),...options});
@@ -81,7 +81,7 @@ test('handshake timeout closes silent connection', {timeout:8000},async t=>{
   const f=await fixture(t),c=await connect(t,f.url);assert.equal(await c.closed,1008);
 });
 test('malformed JSON, unknown type and forged playerId never reach handler',async t=>{
-  const accepted=[];const f=await fixture(t,{onRequest:(r,s)=>{accepted.push(r);s.send({protocolVersion:1,type:'result',requestId:r.requestId,requestType:'room.leave',ok:true});}}),c=await connect(t,f.url);
+  const accepted=[];const f=await fixture(t,{onRequest:(r,s)=>{accepted.push(r);s.send({protocolVersion:2,type:'result',requestId:r.requestId,requestType:'room.leave',ok:true});}}),c=await connect(t,f.url);
   c.send('{');assert.equal((await c.next()).code,'invalid-json');
   c.send(request('hello',{displayName:'\u0000private'}));assert.equal((await c.next()).code,'invalid-message');
   await hello(c);
@@ -90,7 +90,7 @@ test('malformed JSON, unknown type and forged playerId never reach handler',asyn
   c.send(request('room.leave',{requestId:'good',roomId:'room'}));assert.equal((await c.next()).ok,true);assert.equal(accepted.length,1);
 });
 test('unsupported version gets an error and policy close',async t=>{
-  const f=await fixture(t),c=await connect(t,f.url);c.send(request('hello',{protocolVersion:2,displayName:'Host'}));
+  const f=await fixture(t),c=await connect(t,f.url);c.send(request('hello',{protocolVersion:1,displayName:'Host'}));
   assert.equal((await c.next()).code,'unsupported-version');assert.equal(await c.closed,1008);
 });
 test('binary, invalid UTF-8, bad masking and fragmented oversize messages are closed',async t=>{
@@ -107,7 +107,7 @@ test('valid fragmented text messages are reassembled and compression is disabled
   assert.equal((await c.next()).type,'welcome');assert.equal(c.ws.extensions,'');
 });
 test('request/command duplicates are rejected atomically before handler',async t=>{
-  const handled=[];const f=await fixture(t,{onRequest:(r,s)=>{handled.push([r.commandId,s.identity]);s.send({protocolVersion:1,type:'command.result',requestId:r.requestId,commandId:r.commandId,matchId:r.matchId,accepted:false,revision:null,rejection:'not-in-room'});}}),c=await connect(t,f.url);
+  const handled=[];const f=await fixture(t,{onRequest:(r,s)=>{handled.push([r.commandId,s.identity]);s.send({protocolVersion:2,type:'command.result',requestId:r.requestId,commandId:r.commandId,matchId:r.matchId,accepted:false,revision:null,rejection:'not-in-room'});}}),c=await connect(t,f.url);
   const w=await hello(c);
   const cmd=request('game.command',{requestId:'a',commandId:'cmd-a',roomId:'room',matchId:'match',action:{type:'jump'}});
   c.send(cmd);assert.equal((await c.next()).type,'command.result');
@@ -137,7 +137,7 @@ test('maximum connections includes peers which have not said hello',async t=>{
 });
 test('handler dispatch is serialized and exceptions close only the affected client',async t=>{
   const order=[];let release;const gate=new Promise(resolve=>{release=resolve;});
-  const f=await fixture(t,{onRequest:async(r,s)=>{order.push(r.requestId);if(r.requestId==='first')await gate;if(r.requestId==='fail')throw Error('secret exception');s.send({protocolVersion:1,type:'result',requestId:r.requestId,requestType:'room.leave',ok:true});}});
+  const f=await fixture(t,{onRequest:async(r,s)=>{order.push(r.requestId);if(r.requestId==='first')await gate;if(r.requestId==='fail')throw Error('secret exception');s.send({protocolVersion:2,type:'result',requestId:r.requestId,requestType:'room.leave',ok:true});}});
   const c=await connect(t,f.url);await hello(c);
   c.send(request('room.leave',{requestId:'first',roomId:'room'}));c.send(request('room.leave',{requestId:'second',roomId:'room'}));
   await delay(20);assert.deepEqual(order,['first']);release();assert.equal((await c.next()).requestId,'first');assert.equal((await c.next()).requestId,'second');
@@ -145,7 +145,7 @@ test('handler dispatch is serialized and exceptions close only the affected clie
   const other=await connect(t,f.url);await hello(other);assert(!JSON.stringify(f.logs).includes('secret exception'));
 });
 test('invalid outgoing DTO is blocked; disconnected identities are released once',async t=>{
-  const identities=[];const f=await fixture(t,{onRequest:(_r,s)=>s.send({protocolVersion:1,type:'cheat'}),onDisconnect:i=>identities.push(i)}),c=await connect(t,f.url);
+  const identities=[];const f=await fixture(t,{onRequest:(_r,s)=>s.send({protocolVersion:2,type:'cheat'}),onDisconnect:i=>identities.push(i)}),c=await connect(t,f.url);
   const w=await hello(c);c.send(request('room.create',{requestId:'create'}));assert.equal(await c.closed,1011);await delay(10);
   assert.equal(identities.length,1);assert.equal(identities[0].playerId,w.playerId);assert.equal(f.server.connectionCount,0);
 });
@@ -185,7 +185,7 @@ test('CLI help and invalid configuration work from project and package directori
     child.once('error',reject);child.once('close',code=>resolve({code,output}));
   });}
   for(const cwd of directories){
-    const help=await cli(['--help'],cwd);assert.equal(help.code,0,help.output);assert(help.output.includes('/ws'));assert(help.output.includes('(S1)'));
+    const help=await cli(['--help'],cwd);assert.equal(help.code,0,help.output);assert(help.output.includes('/ws'));assert(help.output.includes('(S2)'));
     const invalid=await cli(['--port','0'],cwd);assert.equal(invalid.code,1,invalid.output);assert(invalid.output.includes('Port must be 1..65535'));assert(!invalid.output.includes(' at '));
   }
 });
@@ -206,7 +206,7 @@ test('stop during startup waits for listen completion; stopped servers cannot re
 test('outgoing socket queue is bounded even when the peer stops reading',{skip:TCP&&'Deterministic stream backpressure test'},async t=>{
   let refusedSend=false;
   const f=await fixture(t,{onRequest:(request,session)=>{
-    const message={protocolVersion:1,type:'error',requestId:request.requestId,code:'internal-error',message:'x'.repeat(256)};
+    const message={protocolVersion:2,type:'error',requestId:request.requestId,code:'internal-error',message:'x'.repeat(256)};
     for(let i=0;i<5000;i++){if(!session.send(message)){refusedSend=true;break;}}
   }}),c=await connect(t,f.url);await hello(c);
   const socket=c.ws._socket.peer,original=socket._write;let held;
@@ -231,14 +231,17 @@ function sendRequest(client, type, requestId, fields = {}) {
 async function createRoom(host) {
   const result = await sendRequest(host, 'room.create', 'create');
   assert.equal(result.ok, true);
-  assert.deepEqual(await host.next(), { protocolVersion: 1, type: 'room.state', room: result.room });
-  return result.room;
+  assert.deepEqual(await host.next(), { protocolVersion: 2, type: 'room.state', room: result.room });
+  assert.match(result.resumeToken, /^[A-Za-z0-9_-]{43}$/);
+  return result;
 }
 
 async function startMatch(host, guest) {
-  const { roomId } = await createRoom(host);
+  const { room: { roomId }, resumeToken: hostToken } = await createRoom(host);
   const join = await sendRequest(guest, 'room.join', 'join', { roomId });
   assert.equal(join.ok, true);
+  assert.match(join.resumeToken, /^[A-Za-z0-9_-]{43}$/);
+  assert.notEqual(join.resumeToken, hostToken);
   assert.deepEqual((await host.next()).room, join.room);
   assert.deepEqual((await guest.next()).room, join.room);
 
@@ -269,15 +272,15 @@ async function startMatch(host, guest) {
   assert.deepEqual(initial.events, []);
   assert.deepEqual(await guest.next(), initial);
   assert.equal((await host.next()).code, 'room-not-in-lobby');
-  return { roomId, matchId, initial };
+  return { roomId, matchId, initial, hostToken, guestToken: join.resumeToken };
 }
 
 test('S1 lobby serializes competing joins, resets readiness and transfers the host role', async t => {
   const f = await fixture(t, {}, createMatchServer);
   const host = await connect(t, f.url), first = await connect(t, f.url), second = await connect(t, f.url);
   const [, firstIdentity, secondIdentity] = await Promise.all([hello(host), hello(first), hello(second)]);
-  assert.equal((await (await f.get('/health')).json()).stage, 'S1');
-  const { roomId, roomRevision } = await createRoom(host);
+  assert.equal((await (await f.get('/health')).json()).stage, 'S2');
+  const { room: { roomId, roomRevision } } = await createRoom(host);
   assert.equal(roomRevision, 1);
   assert.equal((await sendRequest(host, 'room.create', 'another')).code, 'already-in-room');
   const ready = await sendRequest(host, 'room.ready', 'ready', { roomId, ready: true });
@@ -332,7 +335,7 @@ test('S1 room limit releases capacity after the last member leaves', async t => 
   const extra = await connect(t, f.url);
   await hello(extra);
   assert.equal((await sendRequest(extra, 'room.create', 'over-limit')).code, 'resource-limit');
-  assert.equal((await sendRequest(hosts[0], 'room.leave', 'free-slot', { roomId: first.roomId })).ok, true);
+  assert.equal((await sendRequest(hosts[0], 'room.leave', 'free-slot', { roomId: first.room.roomId })).ok, true);
   await createRoom(extra);
 });
 
@@ -340,7 +343,7 @@ test('S1 two WebSockets play the same match through destruction, turn changes an
   const f = await fixture(t, {}, createMatchServer);
   const host = await connect(t, f.url), guest = await connect(t, f.url), outside = await connect(t, f.url);
   const [hostIdentity, guestIdentity] = await Promise.all([hello(host), hello(guest), hello(outside)]);
-  const { roomId, matchId, initial } = await startMatch(host, guest);
+  const { roomId, matchId, initial, guestToken } = await startMatch(host, guest);
   const address = { roomId, matchId };
   const command = (client, id, action, fields = {}) => sendRequest(client, 'game.command', id, {
     commandId: 'cmd-' + id, ...address, ...fields, action,
@@ -375,7 +378,7 @@ test('S1 two WebSockets play the same match through destruction, turn changes an
   const shot = await command(host, 'shot', fire);
   assert.equal(shot.accepted, true);
   const duplicate = await command(host, 'duplicate-shot', fire, { commandId: 'cmd-shot' });
-  assert.equal(duplicate.code, 'duplicate-id');
+  assert.deepEqual(duplicate, { ...shot, requestId: 'duplicate-shot' });
   const resolving = await sendRequest(host, 'game.snapshot', 'resolving', address);
   assert.equal(resolving.type, 'game.snapshot');
   assert.equal(resolving.state.phase, 'resolving');
@@ -417,27 +420,98 @@ test('S1 two WebSockets play the same match through destruction, turn changes an
   assert.deepEqual(await guest.next(), finishedRoom);
   assert.equal((await command(host, 'late-action', { type: 'start-turn' })).rejection, 'game-finished');
   assert.equal((await sendRequest(host, 'room.start', 'restart', { roomId })).code, 'room-not-in-lobby');
-  assert.equal((await sendRequest(guest, 'room.leave', 'finished-leave', { roomId })).ok, true);
-  assert.deepEqual(await host.next(), { protocolVersion: 1, type: 'room.closed', ...address, reason: 'player-left' });
+  guest.ws.terminate();
+  await receive(host, message => message.type === 'room.state' && !message.room.players[1].connected);
+  const rejoined = await connect(t, f.url);
+  const welcome = await sendRequest(rejoined, 'hello', 'finished-resume', { resumeToken: guestToken });
+  assert.equal(welcome.playerId, guestIdentity.playerId);
+  assert.equal(welcome.resumed.room.status, 'finished');
+  assert.deepEqual(welcome.resumed.snapshot.state, finished.state);
+  assert.deepEqual(welcome.resumed.snapshot.events, []);
+  await receive(host, message => message.type === 'room.state' && message.room.players[1].connected);
+  assert.equal((await sendRequest(rejoined, 'room.leave', 'finished-leave', { roomId })).ok, true);
+  assert.deepEqual(await host.next(), { protocolVersion: 2, type: 'room.closed', ...address, reason: 'player-left' });
   assert.equal((await sendRequest(host, 'game.snapshot', 'after-leave', address)).code, 'not-in-room');
 });
 
-test('S1 disconnect during flight closes the match and frees the remaining player', async t => {
+test('S2 reconnects during flight and returns the original result for a fire without a consumed acknowledgement', async t => {
   const f = await fixture(t, {}, createMatchServer);
   const host = await connect(t, f.url), guest = await connect(t, f.url);
-  await Promise.all([hello(host), hello(guest)]);
-  const { roomId, matchId } = await startMatch(host, guest);
+  const [identity] = await Promise.all([hello(host), hello(guest)]);
+  const { roomId, matchId, hostToken, initial } = await startMatch(host, guest);
   const address = { roomId, matchId };
-  for (const action of [{ type: 'start-turn' }, { type: 'fire', angleDegrees: 90, power: 1 }]) {
-    const result = await sendRequest(host, 'game.command', 'flight-' + action.type, {
-      commandId: 'cmd-' + action.type, ...address, action,
-    });
-    assert.equal(result.accepted, true);
-  }
-  await receive(guest, message => message.type === 'game.update' && message.state.phase === 'resolving');
+  assert.equal((await sendRequest(host, 'game.command', 'turn', {
+    ...address, commandId: 'turn', action: { type: 'start-turn' },
+  })).accepted, true);
+  const action = { type: 'fire', angleDegrees: 90, power: 0 };
+  host.send(request('game.command', { ...address, requestId: 'first-shot', commandId: 'shot', action }));
+  const flight = await receive(guest, message => message.type === 'game.update' && message.state.projectile !== null);
   host.ws.terminate();
+  const away = await receive(guest, message => message.type === 'room.state' && !message.room.players[0].connected);
+  assert.equal(away.room.matchId, matchId);
+  const returning = await connect(t, f.url);
+  const welcome = await sendRequest(returning, 'hello', 'restore', { resumeToken: hostToken });
+  assert.equal(welcome.playerId, identity.playerId);
+  assert.notEqual(welcome.connectionId, identity.connectionId);
+  assert.equal(welcome.resumed.room.players[0].connected, true);
+  assert.equal(welcome.resumed.snapshot.state.phase, 'resolving');
+  assert(welcome.resumed.snapshot.revision >= flight.revision);
+  assert.deepEqual(welcome.resumed.snapshot.events, []);
+  await receive(guest, message => message.type === 'room.state' && message.room.players[0].connected);
+
+  const retained = await sendRequest(returning, 'game.command', 'repeated-shot', {
+    ...address, commandId: 'shot', action: { power: 0, angleDegrees: 90, type: 'fire' },
+  });
+  assert.equal(retained.accepted, true);
+  assert(retained.revision <= flight.revision);
+  const conflict = await sendRequest(returning, 'game.command', 'different-shot', {
+    ...address, commandId: 'shot', action: { ...action, power: 1 },
+  });
+  assert.equal(conflict.code, 'command-id-conflict');
+  const recovered = await receive(returning, message => message.type === 'game.update' && message.state.phase === 'waiting');
+  assert.equal(recovered.state.turnNumber, 2);
+  assert(recovered.state.worms[0].health < 100);
+  assert.notDeepEqual(recovered.state.terrain.cells, initial.state.terrain.cells);
+  assert(!JSON.stringify(f.logs).includes(hostToken));
+});
+
+test('S2 retains the waiting turn and drops held movement without stopping active time', async t => {
+  const f = await fixture(t, {}, createMatchServer);
+  let host = await connect(t, f.url);
+  const guest = await connect(t, f.url);
+  await Promise.all([hello(host), hello(guest)]);
+  const { roomId, matchId, hostToken } = await startMatch(host, guest);
+  const address = { roomId, matchId };
+  const returning = await connect(t, f.url);
+  assert.equal((await sendRequest(returning, 'hello', 'occupied', { resumeToken: hostToken })).code, 'resume-in-use');
+  host.ws.terminate();
+  await receive(guest, message => message.type === 'room.state' && !message.room.players[0].connected);
+  const restored = await sendRequest(returning, 'hello', 'waiting', { resumeToken: hostToken });
+  assert.equal(restored.resumed.snapshot.state.phase, 'waiting');
+  assert.equal(restored.resumed.snapshot.state.tick, 0);
+  host = returning;
+  for (const action of [{ type: 'start-turn' }, { type: 'move', direction: 1 }]) {
+    assert.equal((await sendRequest(host, 'game.command', action.type, { ...address, commandId: action.type, action })).accepted, true);
+  }
+  const moving = await receive(guest, message => message.type === 'game.update' && message.state.movementDirection === 1);
+  host.ws.terminate();
+  const stopped = await receive(guest, message => message.type === 'game.update' && message.state.movementDirection === 0);
+  assert.equal(stopped.state.phase, 'active');
+  assert(stopped.state.turnTicksRemaining < moving.state.turnTicksRemaining);
+});
+
+test('S2 expires the absent player’s seat and frees both members', async t => {
+  const f = await fixture(t, { resumeRetentionMs: 150 }, createMatchServer);
+  const host = await connect(t, f.url), guest = await connect(t, f.url);
+  await Promise.all([hello(host), hello(guest)]);
+  const { roomId, matchId, hostToken } = await startMatch(host, guest);
+  host.ws.terminate();
+  await receive(guest, message => message.type === 'room.state' && !message.room.players[0].connected);
   const closed = await receive(guest, message => message.type === 'room.closed');
-  assert.deepEqual(closed, { protocolVersion: 1, type: 'room.closed', ...address, reason: 'player-disconnected' });
+  const address = { roomId, matchId };
+  assert.deepEqual(closed, { protocolVersion: 2, type: 'room.closed', ...address, reason: 'player-disconnected' });
   assert.equal((await sendRequest(guest, 'room.join', 'closed-join', { roomId })).code, 'room-not-found');
-  assert.notEqual((await createRoom(guest)).roomId, roomId);
+  const returning = await connect(t, f.url);
+  assert.equal((await sendRequest(returning, 'hello', 'expired', { resumeToken: hostToken })).code, 'resume-unavailable');
+  assert.notEqual((await createRoom(guest)).room.roomId, roomId);
 });

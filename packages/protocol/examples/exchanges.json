@@ -4,14 +4,14 @@
     {
       "name": "hello",
       "request": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "hello",
         "requestId": "req-1",
         "displayName": "Host"
       },
       "responses": [
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "welcome",
           "requestId": "req-1",
           "connectionId": "connection-1",
@@ -45,7 +45,7 @@
         }
       ],
       "failure": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "error",
         "requestId": "req-1",
         "code": "unsupported-version",
@@ -55,17 +55,18 @@
     {
       "name": "create",
       "request": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "room.create",
         "requestId": "req-2"
       },
       "responses": [
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "result",
           "requestId": "req-2",
           "requestType": "room.create",
           "ok": true,
+          "resumeToken": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
           "room": {
             "roomId": "room-1",
             "roomRevision": 1,
@@ -83,7 +84,7 @@
           }
         },
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "room.state",
           "room": {
             "roomId": "room-1",
@@ -103,7 +104,7 @@
         }
       ],
       "failure": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "result",
         "requestId": "req-2",
         "requestType": "room.create",
@@ -114,18 +115,19 @@
     {
       "name": "join",
       "request": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "room.join",
         "requestId": "guest-2",
         "roomId": "room-1"
       },
       "responses": [
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "result",
           "requestId": "guest-2",
           "requestType": "room.join",
           "ok": true,
+          "resumeToken": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA",
           "room": {
             "roomId": "room-1",
             "roomRevision": 2,
@@ -149,7 +151,7 @@
           }
         },
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "room.state",
           "room": {
             "roomId": "room-1",
@@ -175,7 +177,7 @@
         }
       ],
       "failure": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "result",
         "requestId": "guest-2",
         "requestType": "room.join",
@@ -186,7 +188,7 @@
     {
       "name": "ready-0",
       "request": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "room.ready",
         "requestId": "ready-0",
         "roomId": "room-1",
@@ -194,7 +196,7 @@
       },
       "responses": [
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "result",
           "requestId": "ready-0",
           "requestType": "room.ready",
@@ -222,7 +224,7 @@
           }
         },
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "room.state",
           "room": {
             "roomId": "room-1",
@@ -248,7 +250,7 @@
         }
       ],
       "failure": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "result",
         "requestId": "ready-0",
         "requestType": "room.ready",
@@ -259,7 +261,7 @@
     {
       "name": "ready-1",
       "request": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "room.ready",
         "requestId": "ready-1",
         "roomId": "room-1",
@@ -267,7 +269,7 @@
       },
       "responses": [
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "result",
           "requestId": "ready-1",
           "requestType": "room.ready",
@@ -295,7 +297,7 @@
           }
         },
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "room.state",
           "room": {
             "roomId": "room-1",
@@ -321,7 +323,7 @@
         }
       ],
       "failure": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "result",
         "requestId": "ready-1",
         "requestType": "room.ready",
@@ -332,14 +334,14 @@
     {
       "name": "start",
       "request": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "room.start",
         "requestId": "req-start",
         "roomId": "room-1"
       },
       "responses": [
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "result",
           "requestId": "req-start",
           "requestType": "room.start",
@@ -348,7 +350,7 @@
           "revision": 0
         },
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "room.state",
           "room": {
             "roomId": "room-1",
@@ -373,11 +375,12 @@
           }
         },
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "game.update",
           "roomId": "room-1",
           "matchId": "match-1",
           "revision": 0,
+          "updateSequence": 0,
           "serverTimeMs": 1792857600000,
           "state": {
             "version": 1,
@@ -437,7 +440,7 @@
         }
       ],
       "failure": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "result",
         "requestId": "req-start",
         "requestType": "room.start",
@@ -448,7 +451,7 @@
     {
       "name": "start-turn",
       "request": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "game.command",
         "requestId": "action-0",
         "roomId": "room-1",
@@ -460,7 +463,7 @@
       },
       "responses": [
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "command.result",
           "requestId": "action-0",
           "commandId": "cmd-0",
@@ -469,11 +472,12 @@
           "revision": 1
         },
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "game.update",
           "roomId": "room-1",
           "matchId": "match-1",
           "revision": 1,
+          "updateSequence": 1,
           "serverTimeMs": 1792857600017,
           "state": {
             "version": 1,
@@ -539,7 +543,7 @@
         }
       ],
       "failure": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "command.result",
         "requestId": "action-0",
         "commandId": "cmd-0",
@@ -552,7 +556,7 @@
     {
       "name": "move-1",
       "request": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "game.command",
         "requestId": "action-1",
         "roomId": "room-1",
@@ -565,7 +569,7 @@
       },
       "responses": [
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "command.result",
           "requestId": "action-1",
           "commandId": "cmd-1",
@@ -574,11 +578,12 @@
           "revision": 2
         },
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "game.update",
           "roomId": "room-1",
           "matchId": "match-1",
           "revision": 2,
+          "updateSequence": 2,
           "serverTimeMs": 1792857600034,
           "state": {
             "version": 1,
@@ -638,7 +643,7 @@
         }
       ],
       "failure": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "command.result",
         "requestId": "action-1",
         "commandId": "cmd-1",
@@ -651,7 +656,7 @@
     {
       "name": "move-0",
       "request": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "game.command",
         "requestId": "action-2",
         "roomId": "room-1",
@@ -664,7 +669,7 @@
       },
       "responses": [
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "command.result",
           "requestId": "action-2",
           "commandId": "cmd-2",
@@ -673,11 +678,12 @@
           "revision": 3
         },
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "game.update",
           "roomId": "room-1",
           "matchId": "match-1",
           "revision": 3,
+          "updateSequence": 3,
           "serverTimeMs": 1792857600051,
           "state": {
             "version": 1,
@@ -737,7 +743,7 @@
         }
       ],
       "failure": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "command.result",
         "requestId": "action-2",
         "commandId": "cmd-2",
@@ -750,7 +756,7 @@
     {
       "name": "jump",
       "request": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "game.command",
         "requestId": "action-3",
         "roomId": "room-1",
@@ -762,7 +768,7 @@
       },
       "responses": [
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "command.result",
           "requestId": "action-3",
           "commandId": "cmd-3",
@@ -771,11 +777,12 @@
           "revision": 4
         },
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "game.update",
           "roomId": "room-1",
           "matchId": "match-1",
           "revision": 4,
+          "updateSequence": 4,
           "serverTimeMs": 1792857600068,
           "state": {
             "version": 1,
@@ -835,7 +842,7 @@
         }
       ],
       "failure": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "command.result",
         "requestId": "action-3",
         "commandId": "cmd-3",
@@ -848,7 +855,7 @@
     {
       "name": "fire",
       "request": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "game.command",
         "requestId": "action-4",
         "roomId": "room-1",
@@ -862,7 +869,7 @@
       },
       "responses": [
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "command.result",
           "requestId": "action-4",
           "commandId": "cmd-4",
@@ -871,11 +878,12 @@
           "revision": 5
         },
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "game.update",
           "roomId": "room-1",
           "matchId": "match-1",
           "revision": 5,
+          "updateSequence": 5,
           "serverTimeMs": 1792857600085,
           "state": {
             "version": 1,
@@ -955,7 +963,7 @@
         }
       ],
       "failure": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "command.result",
         "requestId": "action-4",
         "commandId": "cmd-4",
@@ -968,7 +976,7 @@
     {
       "name": "end-turn-independent-branch",
       "request": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "game.command",
         "requestId": "pass-1",
         "roomId": "room-1",
@@ -980,7 +988,7 @@
       },
       "responses": [
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "command.result",
           "requestId": "pass-1",
           "commandId": "cmd-pass",
@@ -989,11 +997,12 @@
           "revision": 2
         },
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "game.update",
           "roomId": "room-1",
           "matchId": "match-1",
           "revision": 2,
+          "updateSequence": 2,
           "serverTimeMs": 1792857600034,
           "state": {
             "version": 1,
@@ -1064,7 +1073,7 @@
         }
       ],
       "failure": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "command.result",
         "requestId": "pass-1",
         "commandId": "cmd-pass",
@@ -1077,7 +1086,7 @@
     {
       "name": "snapshot",
       "request": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "game.snapshot",
         "requestId": "get-1",
         "roomId": "room-1",
@@ -1085,12 +1094,13 @@
       },
       "responses": [
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "game.snapshot",
           "requestId": "get-1",
           "roomId": "room-1",
           "matchId": "match-1",
           "revision": 2,
+          "updateSequence": 2,
           "serverTimeMs": 1792857600034,
           "state": {
             "version": 1,
@@ -1150,7 +1160,7 @@
         }
       ],
       "failure": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "result",
         "requestId": "get-1",
         "requestType": "game.snapshot",
@@ -1161,21 +1171,21 @@
     {
       "name": "leave-playing",
       "request": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "room.leave",
         "requestId": "leave-1",
         "roomId": "room-1"
       },
       "responses": [
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "result",
           "requestId": "leave-1",
           "requestType": "room.leave",
           "ok": true
         },
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "room.closed",
           "roomId": "room-1",
           "matchId": "match-1",
@@ -1183,7 +1193,7 @@
         }
       ],
       "failure": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "result",
         "requestId": "leave-1",
         "requestType": "room.leave",
@@ -1197,7 +1207,7 @@
       "name": "malformed-json",
       "raw": "{",
       "response": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "error",
         "requestId": null,
         "code": "invalid-json",
@@ -1207,13 +1217,13 @@
     {
       "name": "version",
       "message": {
-        "protocolVersion": 2,
+        "protocolVersion": 1,
         "type": "hello",
         "requestId": "bad-version",
         "displayName": "Guest"
       },
       "response": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "error",
         "requestId": "bad-version",
         "code": "unsupported-version",
@@ -1223,12 +1233,12 @@
     {
       "name": "unknown-type",
       "message": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "cheat",
         "requestId": "bad-type"
       },
       "response": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "error",
         "requestId": "bad-type",
         "code": "unknown-type",
@@ -1238,7 +1248,7 @@
     {
       "name": "spoof-player",
       "message": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "game.command",
         "requestId": "spoof",
         "roomId": "room-1",
@@ -1250,7 +1260,7 @@
         }
       },
       "response": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "error",
         "requestId": "spoof",
         "code": "invalid-message",
@@ -1260,7 +1270,7 @@
     {
       "name": "duplicate-id",
       "message": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "game.command",
         "requestId": "action-0",
         "roomId": "room-1",
@@ -1271,7 +1281,7 @@
         }
       },
       "response": {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "type": "error",
         "requestId": "action-0",
         "code": "duplicate-id",
@@ -1285,11 +1295,12 @@
       "description": "Final tick of a separate real core match; no client request.",
       "messages": [
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "game.update",
           "roomId": "room-finished",
           "matchId": "match-finished",
           "revision": 412,
+          "updateSequence": 7,
           "serverTimeMs": 1792857700000,
           "state": {
             "version": 1,
@@ -1377,7 +1388,7 @@
           ]
         },
         {
-          "protocolVersion": 1,
+          "protocolVersion": 2,
           "type": "room.state",
           "room": {
             "roomId": "room-finished",

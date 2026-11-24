@@ -15,6 +15,7 @@ export class Match {
   private lastUpdateAt = 0;
   private publishedRevision = 0;
   private revision = 0;
+  private updateSequence = 0;
 
   constructor(
     readonly id: string,
@@ -31,8 +32,15 @@ export class Match {
   }
 
   snapshot(): SnapshotFields {
-    return { roomId: this.roomId, matchId: this.id, revision: this.revision, serverTimeMs: Date.now(),
+    return { roomId: this.roomId, matchId: this.id, revision: this.revision, updateSequence: this.updateSequence, serverTimeMs: Date.now(),
       state: this.state, events: [] };
+  }
+
+  releaseMovement(playerId: string): void {
+    if (this.state.phase === 'active' && this.state.movementDirection !== 0 &&
+        this.state.players[this.state.activePlayerIndex] === playerId) {
+      this.command({ type: 'move', playerId, direction: 0 });
+    }
   }
 
   command(action: Action): { accepted: true; revision: number } |
@@ -69,6 +77,7 @@ export class Match {
 
   private broadcast(): void {
     this.lastUpdateAt = performance.now();
+    if (this.revision !== this.publishedRevision) this.updateSequence++;
     this.publishedRevision = this.revision;
     const events = this.events;
     this.events = [];

@@ -1,5 +1,5 @@
 import type { Action, GameState, GameEvent, Rejection } from '@office-worms/game-core';
-import type { LIMITS, PROTOCOL_ERROR_CODES, ADDRESS_REJECTIONS, REQUEST_REJECTIONS } from './constants.js';
+import type { LIMITS, PROTOCOL_VERSION, PROTOCOL_ERROR_CODES, ADDRESS_REJECTIONS, REQUEST_REJECTIONS } from './constants.js';
 
 type WithoutIdentity<T> = T extends Action ? Omit<T, 'playerId'> : never;
 export type NetworkAction = WithoutIdentity<Action>;
@@ -7,7 +7,7 @@ export type Limits = typeof LIMITS;
 export type ProtocolErrorCode = typeof PROTOCOL_ERROR_CODES[number];
 export type AddressRejection = typeof ADDRESS_REJECTIONS[number];
 export type RoomRequestType = keyof typeof REQUEST_REJECTIONS;
-interface Envelope<T extends string> { protocolVersion: 1; type: T }
+interface Envelope<T extends string> { protocolVersion: typeof PROTOCOL_VERSION; type: T }
 interface Request<T extends string> extends Envelope<T> { requestId: string }
 export interface RoomPlayer { playerId: string; displayName: string; ready: boolean; connected: boolean }
 export interface Room {
@@ -15,7 +15,7 @@ export interface Room {
   status: 'lobby' | 'playing' | 'finished'; players: RoomPlayer[]; matchId: string | null;
 }
 export type ClientMessage =
-  | (Request<'hello'> & { displayName: string })
+  | (Request<'hello'> & ({ displayName: string } | { resumeToken: string }))
   | Request<'room.create'>
   | (Request<'room.join' | 'room.leave' | 'room.start'> & { roomId: string })
   | (Request<'room.ready'> & { roomId: string; ready: boolean })
@@ -25,7 +25,8 @@ export type RequestFailure = {
   [K in RoomRequestType]: Request<'result'> & { requestType: K; ok: false; code: typeof REQUEST_REJECTIONS[K][number] }
 }[RoomRequestType];
 export type RequestSuccess = Request<'result'> & { ok: true } & (
-  | { requestType: 'room.create' | 'room.join' | 'room.ready'; room: Room }
+  | { requestType: 'room.create' | 'room.join'; room: Room; resumeToken?: string }
+  | { requestType: 'room.ready'; room: Room }
   | { requestType: 'room.leave' }
   | { requestType: 'room.start'; matchId: string; revision: 0 }
 );
@@ -35,11 +36,12 @@ export type CommandResult = Request<'command.result'> & { commandId: string; mat
   | { accepted: false; revision: null; rejection: AddressRejection }
 );
 export interface SnapshotFields {
-  roomId: string; matchId: string; revision: number; serverTimeMs: number;
+  roomId: string; matchId: string; revision: number; updateSequence: number; serverTimeMs: number;
   state: GameState; events: GameEvent[];
 }
 export type ServerMessage =
-  | (Request<'welcome'> & { connectionId: string; playerId: string; displayName: string; serverTimeMs: number; limits: Limits })
+  | (Request<'welcome'> & { connectionId: string; playerId: string; displayName: string; serverTimeMs: number; limits: Limits;
+    resumed?: { room: Room; snapshot: SnapshotFields } })
   | RequestSuccess | RequestFailure | CommandResult
   | (Envelope<'room.state'> & { room: Room })
   | (Envelope<'room.closed'> & { roomId: string; matchId: string; reason: 'player-left' | 'player-disconnected' })

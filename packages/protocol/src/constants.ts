@@ -1,6 +1,8 @@
-/** Fixed protocol v1 caps, shared by producers and validators. No platform APIs. */
-export const PROTOCOL_VERSION = 1;
+/** Fixed protocol caps, shared by producers and validators. No platform APIs. */
+export const PROTOCOL_VERSION = 2;
 export const STATE_VERSION = 1;
+export const RESUME_RETENTION_MS = 10 * 60 * 1000;
+export const MAX_MATCH_COMMANDS_PER_PLAYER = 4096;
 export const LIMITS = Object.freeze({
   maxClientMessageBytes: 4096,
   maxServerMessageBytes: 262144,
@@ -29,6 +31,7 @@ export const PROTOCOL_ERROR_CODES = [
   'invalid-json', 'invalid-message', 'unknown-type', 'unsupported-state-version',
   'unsupported-version', 'handshake-required', 'already-initialized', 'duplicate-id',
   'message-too-large', 'rate-limited', 'resource-limit', 'not-implemented', 'internal-error',
+  'resume-unavailable', 'resume-in-use', 'command-id-conflict',
 ] as const;
 export const ADDRESS_REJECTIONS = ['not-in-room', 'match-not-found', 'match-mismatch'] as const;
 export const CORE_REJECTIONS = ['game-finished', 'wrong-player', 'wrong-phase', 'invalid-action'] as const;

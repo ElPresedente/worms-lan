@@ -43,7 +43,7 @@ export function mountGame(root: HTMLElement, session: GameSession, debug?: Debug
   root.innerHTML = `
     <header class="topbar">
       <a class="wordmark" href="./" aria-label="Office Worms — главная"><span class="brand-mark" aria-hidden="true"><i></i><i></i></span>office<span>worms</span></a>
-      <div class="mode"><span class="live-dot"></span> ${online ? 'Сетевая партия' : 'Локальный режим <span class="mode-note">/ 2 игрока за одним экраном</span>'}</div>
+      <div class="mode"><span class="live-dot"></span> ${online ? '<span id="match-connection" role="status">Сетевая партия</span>' : 'Локальный режим <span class="mode-note">/ 2 игрока за одним экраном</span>'}</div>
       ${online ? '<button type="button" class="tool-button nav-action" id="leave-match">Покинуть комнату</button>' : '<a class="tool-button nav-action" href="?mode=online">Сетевая игра</a>'}
     </header>
     <main>
@@ -109,11 +109,12 @@ export function mountGame(root: HTMLElement, session: GameSession, debug?: Debug
   const map = el<HTMLSelectElement>('map'), wind = el<HTMLInputElement>('wind');
   let lastTurn = -1, lastPhase = '', eventCount = 0;
   let pendingActions = 0;
+  let reconnecting = false;
   const abort = new AbortController();
   const on = (target: EventTarget, type: string, handler: EventListener) => target.addEventListener(type, handler, { signal: abort.signal });
   function error(message: string): void { el('error').textContent = message; el('error').hidden = !message; }
   function showOutcome(outcome: CommandOutcome): void {
-    if (abort.signal.aborted) return;
+    if (abort.signal.aborted || reconnecting) return;
     if (outcome.kind === 'rejected' || outcome.kind === 'error') error(rejectionMessage(outcome.code));
     if (outcome.kind === 'unknown') {
       error('Сервер не подтвердил команду. Проверьте состояние игры перед следующим действием.');
@@ -206,7 +207,7 @@ export function mountGame(root: HTMLElement, session: GameSession, debug?: Debug
     el('turn-label').textContent = 'ХОД ' + String(state.turnNumber).padStart(2, '0');
     el('timer').textContent = state.phase === 'active' ? Math.ceil(state.turnTicksRemaining / TICK_RATE) + 'с' : finished ? '✓' : '—';
     el('timer').classList.toggle('timer-low', state.phase === 'active' && state.turnTicksRemaining < 10 * TICK_RATE);
-    const opponent = online && !session.canControl && (state.phase === 'waiting' || state.phase === 'active');
+    const opponent = online && online.playerId !== playerId && (state.phase === 'waiting' || state.phase === 'active');
     const status = finished ? (state.winnerId ? 'Победа · ' + name(state.winnerId) : 'Ничья!') :
       opponent && state.phase === 'active' ? 'Ход соперника' : phaseNames[state.phase];
     el('field-phase').textContent = status;
@@ -319,5 +320,19 @@ export function mountGame(root: HTMLElement, session: GameSession, debug?: Debug
   let raf = 0;
   const render = (now: number) => { renderer.draw(session.state, now); raf = requestAnimationFrame(render); };
   raf = requestAnimationFrame(render);
-  return { destroy() { controls.releaseAll(); cancelAnimationFrame(raf); unsubscribe(); abort.abort(); root.replaceChildren(); } };
+  return {
+    setConnectionStatus(status: string, restoring: boolean) {
+      if (!online) return;
+      const indicator = el('match-connection');
+      if (indicator.textContent !== status) indicator.textContent = status;
+      if (reconnecting === restoring) return;
+      reconnecting = restoring;
+      el('leave-match').textContent = restoring ? 'Отменить восстановление' : 'Покинуть комнату';
+      if (restoring) {
+        error('');
+        el('refresh-game').hidden = true;
+      }
+    },
+    destroy() { controls.releaseAll(); cancelAnimationFrame(raf); unsubscribe(); abort.abort(); root.replaceChildren(); },
+  };
 }

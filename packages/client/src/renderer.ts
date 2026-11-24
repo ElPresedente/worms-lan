@@ -24,8 +24,8 @@ export class Battlefield {
     this.ctx = context;
   }
   accept(update: Update): void {
-    if (update.terrainChanged) this.dirty = true;
-    if (update.reset) { this.dirty = true; this.blasts = []; this.impacts = []; this.trail = []; this.lastProjectileTick = -1; }
+    if (update.terrainChanged || update.reset) this.dirty = true;
+    if (update.reset || update.resynced) { this.blasts = []; this.impacts = []; this.trail = []; this.lastProjectileTick = -1; }
     for (const event of update.events) {
       if (event.type === 'damage' || event.type === 'worm-landed') {
         const worm = update.state.worms.find(w => w.id === event.wormId);
