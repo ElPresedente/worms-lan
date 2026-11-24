@@ -19,10 +19,10 @@
 | client | [ROADMAP](../packages/client/ROADMAP.md) | C3 проверен в Chrome, далее C4 |
 | protocol | [ROADMAP](../packages/protocol/ROADMAP.md) | P2 и контракт v2 готовы, далее P3 |
 | server | [ROADMAP](../packages/server/ROADMAP.md) | S2 проверен, далее S3 |
-| vscode-extension | [ROADMAP](../packages/vscode-extension/ROADMAP.md) | Далее каркас V0 и общий клиент C4 |
+| vscode-extension | [ROADMAP](../packages/vscode-extension/ROADMAP.md) | V0 проверен в VS Code, далее V1 |
 
 protocol — реализованный workspace-пакет с контрактом v2 и проверками.
-server ведёт комнаты и симуляцию матча; vscode-extension пока содержит только план.
+server ведёт комнаты и симуляцию матча. vscode-extension открывает локальную партию в webview.
 Workspace-пакеты с package.json создаются при начале реализации.
 
 ## Порядок интеграции
@@ -37,7 +37,7 @@ Workspace-пакеты с package.json создаются при начале р
 | M5. LAN MVP | G3 + P3 + S3 + C5 + V3; требуются M1–M4 | Два компьютера в LAN проходят полную партию в VS Code |
 
 M2 и M3 проверены в двух вкладках Chrome на одной машине. В M4 общий клиент встраивается в VS Code.
-Каркас webview можно проверить с LocalSession до появления сети; продуктовая партия использует сервер.
+Каркас webview проверен с LocalSession. Сетевую партию в редакторе добавит V1.
 
 ## Приёмка LAN MVP
 

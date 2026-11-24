@@ -1,0 +1,26 @@
+{
+  "name": "office-worms-vscode",
+  "displayName": "Office Worms",
+  "description": "Local two-player Office Worms in a VS Code editor tab.",
+  "publisher": "office-worms",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "vscode": "^1.103.0"
+  },
+  "main": "./src/extension.cjs",
+  "contributes": {
+    "commands": [
+      {
+        "command": "officeWorms.open",
+        "title": "Open Game",
+        "category": "Office Worms"
+      },
+      {
+        "command": "officeWorms.focus",
+        "title": "Focus Game",
+        "category": "Office Worms"
+      }
+    ]
+  }
+}

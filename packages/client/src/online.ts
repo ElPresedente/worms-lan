@@ -132,17 +132,19 @@ export function mountOnline(root: HTMLElement): () => void {
     if (session !== match) {
       app?.destroy();
       session = match;
-      app = match && room ? mountGame(game, match, undefined, {
-        playerId: match.playerId,
-        names: new Map(room.players.map(player => [player.playerId, player.displayName])),
-        leave: async () => {
-          if (connection?.status === 'reconnecting') {
-            connection.disconnect('Вы отменили восстановление соединения.');
-            return '';
-          }
-          return run({ type: 'room.leave', roomId: room.roomId });
+      app = match && room ? mountGame(game, match, {
+        online: {
+          playerId: match.playerId,
+          names: new Map(room.players.map(player => [player.playerId, player.displayName])),
+          leave: async () => {
+            if (connection?.status === 'reconnecting') {
+              connection.disconnect('Вы отменили восстановление соединения.');
+              return '';
+            }
+            return run({ type: 'room.leave', roomId: room.roomId });
+          },
+          refresh: () => match.refresh(),
         },
-        refresh: () => match.refresh(),
       }) : undefined;
     }
     lobby.hidden = Boolean(match);

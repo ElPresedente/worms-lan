@@ -22,7 +22,7 @@ export interface GameSession {
 }
 export type CoreEngine = Pick<typeof import('@office-worms/game-core'), 'createGame' | 'dispatch' | 'step'>;
 
-/** Browser development adapter with synchronous access to the core for diagnostics. */
+/** Local development adapter with synchronous access to the core for diagnostics. */
 export class LocalSession implements GameSession {
   private current: GameState;
   private readonly listeners = new Set<(update: Update) => void>();

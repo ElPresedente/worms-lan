@@ -1,17 +1,17 @@
 # vscode-extension — этапы разработки
 
-Статус: только план, реализации/package.json пока нет.
+Статус: V0 проверен в Extension Development Host.
 Общий порядок: [план проекта](../../docs/roadmap.md).
 Ответственность — редактор, жизненный цикл и уведомления; UI берётся из client.
 
-## V0. Каркас и webview
+## V0. Каркас и webview — готово
 
-Раннюю проверку можно выполнить с C0/LocalSession.
+Проверено с LocalSession в VS Code 1.103.2.
 
-- [ ] Пакет расширения, команды открытия/фокусировки, запуск в Extension Development Host.
-- [ ] Общий client с webview-bootstrap без копирования renderer/UI.
-- [ ] webview.asWebviewUri, localResourceRoots, CSP/nonce и локальные ресурсы без CDN.
-- [ ] Повторное открытие и dispose без дублирования панелей/подписок.
+- [x] Пакет расширения, команды открытия/фокусировки, запуск в Extension Development Host.
+- [x] Общий client с webview-bootstrap без копирования renderer/UI.
+- [x] webview.asWebviewUri, localResourceRoots, CSP/nonce и локальные ресурсы без CDN.
+- [x] Повторное открытие и dispose без дублирования панелей/подписок.
 
 Готово: общий клиент работает в VS Code; закрытие/открытие не оставляет старых обработчиков.
 

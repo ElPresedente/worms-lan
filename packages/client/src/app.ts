@@ -18,6 +18,11 @@ interface OnlineControls {
   leave(): Promise<string>;
   refresh(): Promise<boolean>;
 }
+interface GameViewOptions {
+  debug?: DebugControls;
+  online?: OnlineControls;
+  browserNavigation?: boolean;
+}
 const names = new Map([['coral', 'Коралловые'], ['mint', 'Мятные']]);
 const phaseNames = { waiting: 'Ожидание игрока', active: 'Ваш ход', resolving: 'Завершение хода', finished: 'Партия завершена' };
 
@@ -37,14 +42,26 @@ function describe(event: GameEvent, name: (id: string) => string): string {
   }
 }
 
-/** Portable DOM entrypoint: browser today, the same bundle in a VS Code webview later. */
-export function mountGame(root: HTMLElement, session: GameSession, debug?: DebugControls, online?: OnlineControls) {
+/** Renders the shared game interface in a browser or a VS Code webview. */
+export function mountGame(root: HTMLElement, session: GameSession, {
+  debug, online, browserNavigation = true,
+}: GameViewOptions = {}) {
   const name = (id: string) => (online?.names ?? names).get(id) ?? id;
+  const wordmark = '<span class="brand-mark" aria-hidden="true"><i></i><i></i></span>office<span>worms</span>';
+  const brand = browserNavigation
+    ? `<a class="wordmark" href="./" aria-label="Office Worms — главная">${wordmark}</a>`
+    : `<div class="wordmark">${wordmark}</div>`;
+  let navAction = '';
+  if (online) {
+    navAction = '<button type="button" class="tool-button nav-action" id="leave-match">Покинуть комнату</button>';
+  } else if (browserNavigation) {
+    navAction = '<a class="tool-button nav-action" href="?mode=online">Сетевая игра</a>';
+  }
   root.innerHTML = `
     <header class="topbar">
-      <a class="wordmark" href="./" aria-label="Office Worms — главная"><span class="brand-mark" aria-hidden="true"><i></i><i></i></span>office<span>worms</span></a>
+      ${brand}
       <div class="mode"><span class="live-dot"></span> ${online ? '<span id="match-connection" role="status">Сетевая партия</span>' : 'Локальный режим <span class="mode-note">/ 2 игрока за одним экраном</span>'}</div>
-      ${online ? '<button type="button" class="tool-button nav-action" id="leave-match">Покинуть комнату</button>' : '<a class="tool-button nav-action" href="?mode=online">Сетевая игра</a>'}
+      ${navAction}
     </header>
     <main>
       <div class="page-heading"><div><p class="eyebrow">КОРОТКИЙ ПЕРЕРЫВ. ДЛИННАЯ ПАРТИЯ.</p><h1>Офисная баллистика<span>.</span></h1></div><p class="heading-note">Сделай ход.<br>Почти как работа.</p></div>
@@ -333,6 +350,13 @@ export function mountGame(root: HTMLElement, session: GameSession, debug?: Debug
         el('refresh-game').hidden = true;
       }
     },
-    destroy() { controls.releaseAll(); cancelAnimationFrame(raf); unsubscribe(); abort.abort(); root.replaceChildren(); },
+    destroy() {
+      if (abort.signal.aborted) return;
+      abort.abort();
+      cancelAnimationFrame(raf);
+      unsubscribe();
+      controls.releaseAll();
+      root.replaceChildren();
+    },
   };
 }
